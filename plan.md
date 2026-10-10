@@ -21,7 +21,7 @@ The first complete flow is:
 5. **Enter** commits a highlighted autocomplete result first. Once the destination or category is resolved, Enter expands route alternatives below the inputs, in the same narrow vertical column. Empty or ambiguous input does not start navigation.
 6. Route cards, inspired by Apple Maps' comparison flow, show destination, total estimated distance, walking versus flight breakdown, approximate ETA, flight masters/hops, confidence, and any availability caveat. Default order is **distance**, not ETA. Select a card, then press **Go**.
 7. Go starts guidance from the player's actual position. If From was hypothetical, clearly offer to recalculate from current location before starting; never direct the player as though they are at the preview origin.
-8. Minimap and world-map overlays point to the next waypoint, flight master, or destination NPC. A fold control collapses the panel to a direction box with **exactly the same outer width as the From/To panel**, showing arrow, next stop, distance and soft ETA. Click or keybind re-expands it. Stop is always accessible.
+8. Go automatically shrinks the panel to a compact direction box with **exactly the same outer width as the From/To panel**, showing arrow, next stop, distance and soft ETA. Minimap and world-map overlays point to the next waypoint, flight master, or destination NPC. An explicit expand control or keybind reopens route details/editing; a fold control returns to compact guidance. Stop is always accessible.
 9. Optional edge docking leaves a small reclaimable handle at the left or right screen edge when explicitly tucked away. This is a separate state from the full-width collapsed navigation box.
 
 ### Visual direction and docking
