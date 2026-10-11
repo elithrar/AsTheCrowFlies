@@ -70,7 +70,17 @@ function methods:SetVerticalScroll(value) self.scroll=value;if self.scripts.OnVe
 function methods:GetVerticalScroll() return self.scroll or 0 end
 function methods:GetLeft() return 20 end
 function methods:GetTop() return 600 end
-function methods:SetTexture(v) self.texture=v;return true end
+function methods:SetTexture(v) self.texture=v;self.atlas=nil;return true end
+function methods:SetAtlas(v,useSize,filter,reset,wrapH,wrapV)
+    assert(useSize==false and reset==true and wrapH=='CLAMP' and wrapV=='CLAMP')
+    self.atlas=v;self.texture='atlas sheet';self.coords={.1,.2,.3,.4}
+    -- The native API returns nothing on success.
+end
+function methods:GetAtlas() return self.atlas end
+function methods:SetDesaturated(v) self.desaturated=v end
+function methods:SetSnapToPixelGrid(v) self.snap=v end
+function methods:SetTexelSnappingBias(v) self.snapBias=v end
+function methods:SetPushedTexture(v) self.pushedTexture=v end
 function methods:SetVertexColor(...) self.color={...} end
 function methods:SetRotation(v) self.rotation=v end
 function methods:SetDefaultText(v) self.label=v end
@@ -1058,5 +1068,61 @@ test('width resize rebudgets wrapped headings without pushing content outside th
     assert(U.bodyTop+U.bodyScroll:GetHeight()+20<=U.frame:GetHeight()+.001,'rewrapped content stays inside native frame height')
     assert(U.frame.resizeBounds[2]>=chrome+100)
     U.resizeGrip.scripts.OnMouseUp(nil,'LeftButton');C.profile=saved;C.destination=nil;C:Stop();C:ApplyProfile()
+end)
+test('native icons keep atlas crops aspect ratio and font-independent pooled geometry',function()
+    local old=C_Texture
+    C_Texture={GetAtlasInfo=function(name) return {width=name=='common-icon-forwardarrow' and 40 or 20,height=20} end}
+    local clicks=0;local button=U:Button(U.frame,'test',0,0,26,26,function() clicks=clicks+1 end)
+    for _,kind in ipairs({'cog','back','location','left','right'}) do U:Icon(button,kind) end
+    assert(button.icons.back.asset=='common-icon-rotateleft' and button.icons.left.asset=='common-icon-backarrow')
+    assert(button.icons.cog.texture:GetWidth()==20 and button.icons.location.asset=='Interface\\Minimap\\UI-Minimap-Ping-Center')
+    local right=button.icons.right.texture
+    assert(right:GetAtlas()=='common-icon-forwardarrow' and right:GetWidth()==18 and right:GetHeight()==9)
+    assert(right.coords[1]==.1 and right.coords[4]==.4,'atlas-owned UVs must not be overwritten by full-file coordinates')
+    local allocated=#frames;local font=button.text:GetFont()
+    for _,scale in ipairs({.5,.9,1,1.25,1.6}) do
+        button:SetScale(scale)
+        for _,kind in ipairs({'cog','back','location','left','right'}) do
+            U:Icon(button,kind);local icon=button.icons[kind]
+            assert(icon.texture.desaturated and icon.texture.snap==false and icon.texture.snapBias==0)
+            assert(icon:GetWidth()==20 and icon:GetHeight()==20 and icon.point[1]=='CENTER')
+            assert(not button.text:IsShown() and button:GetWidth()==26 and button:GetHeight()==26)
+        end
+    end
+    assert(#frames==allocated and button.text:GetFont()==font,'repeated icon/scale changes allocate no frames or fonts')
+    assert(button.pushedTexture==button.nativePushed and button.nativePushed.color[4]==.3)
+    U.handle.scripts.OnEnter();assert(U.handle.bg.color[1]==U.handle.hoverColor[1] and GameTooltip:GetText()=='Expand navigation')
+    U.handle.scripts.OnLeave();assert(U.handle.bg.color[1]==U.handle.normalColor[1])
+    button.scripts.OnClick();assert(clicks==1);C_Texture=old
+end)
+
+test('native icon fallback resets stale atlas file and direction state',function()
+    local old=C_Texture;C_Texture=nil
+    local button=U:Button(U.frame,'test',0,0,24,28,function() end)
+    U:Icon(button,'left');local icon=button.icons.left;local t=icon.texture
+    assert(icon.asset=='Interface\\ChatFrame\\ChatFrameExpandArrow' and t.coords[1]==1 and t.coords[2]==0)
+    assert(U:NativeIcon(icon,'right') and t.coords[1]==0 and t.coords[2]==1)
+    C_Texture={GetAtlasInfo=function() return {width=20,height=20} end}
+    assert(U:NativeIcon(icon,'back') and t:GetAtlas()=='common-icon-rotateleft' and t.coords[1]==.1)
+    t.SetAtlas=function() error('unavailable atlas') end
+    assert(U:NativeIcon(icon,'left') and not t:GetAtlas() and t.coords[1]==1)
+    t.SetAtlas=methods.SetAtlas;C_Texture.GetAtlasInfo=function() return {width=0,height=20} end
+    assert(U:NativeIcon(icon,'right') and not t:GetAtlas() and t.coords[1]==0)
+    C_Texture.GetAtlasInfo=function() error('unavailable namespace') end
+    assert(U:NativeIcon(icon,'left') and t.coords[1]==1)
+    C_Texture=old
+end)
+
+test('missing native artwork keeps a visible usable action and gear atlas fallback',function()
+    local old=C_Texture;local setTexture=methods.SetTexture
+    C_Texture={GetAtlasInfo=function() return {width=16,height=16} end}
+    methods.SetTexture=function(self,value,...) if value and value:find('Interface\\',1,true) then return false end;return setTexture(self,value,...) end
+    local clicks=0;local button=U:Button(U.frame,'test',0,0,26,26,function() clicks=clicks+1 end)
+    U:Icon(button,'cog');assert(button.icons.cog.asset=='OptionsIcon-Brown' and not button.text:IsShown())
+    U:Icon(button,'location');assert(button.text:IsShown() and button.text:GetText()=='+' and not button.icons.location.texture:IsShown())
+    button.scripts.OnClick();assert(clicks==1)
+    C_Texture=nil;U:Icon(button,'back');assert(button.text:IsShown() and button.text:GetText()=='<')
+    U:Icon(button,'cog');assert(not button.text:IsShown() and button.icons.cog.texture:IsShown())
+    methods.SetTexture=setTexture;C_Texture=old
 end)
 print('PASS runtime scenarios: '..count..'; frames allocated='..#frames)

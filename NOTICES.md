@@ -1,6 +1,8 @@
 # Notices and data boundaries
 
-New addon implementation and three UI masks are authored for AsTheCrowFlies. An implementation license has not yet been chosen by the owner; no redistribution grant is implied by this development draft.
+New addon implementation and bundled UI masks are authored for AsTheCrowFlies. An implementation license has not yet been chosen by the owner; no redistribution grant is implied by this development draft.
+
+Settings, Back, current-location and edge-reveal controls reference native Blizzard textures/atlases supplied by the installed game. Those game images are not copied into the addon or repository. Offline inspection of the matching client's assets informed their selection; extracted preview images remain local development material.
 
 XPIsland (BSD-3-Clause, copyright Matt Silverlock) was inspected for visual and configuration patterns. No XPIsland source, font files or image assets are bundled. Expressway is selected only through the user's installed LibSharedMedia registration, with a game-font fallback.
 

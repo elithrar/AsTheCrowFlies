@@ -153,34 +153,69 @@ function U:Tip(frame,text)
     frame:SetScript("OnLeave",function() if frame.bg then frame.bg:SetVertexColor(unpack(frame.normalColor)) end;GameTooltip:Hide() end)
 end
 function U:ButtonColor(b,normal,hover) b.normalColor=normal;b.hoverColor=hover;b.bg:SetVertexColor(unpack(normal)) end
+-- Use the client's control artwork, independent of the selected font. Atlas
+-- dimensions describe the glyph; the 20px holder remains the alignment box.
+local nativeIcons={
+    cog={{file="Interface\\WorldMap\\GEAR_64GREY",width=64,height=64,size=20},{atlas="OptionsIcon-Brown",size=18}},
+    back={{atlas="common-icon-rotateleft",size=18},{atlas="common-icon-backarrow",size=18},{file="Interface\\ChatFrame\\ChatFrameExpandArrow",width=16,height=16,size=20,flip=true}},
+    location={{file="Interface\\Minimap\\UI-Minimap-Ping-Center",width=16,height=16,size=18}},
+    left={{atlas="common-icon-backarrow",size=18},{file="Interface\\ChatFrame\\ChatFrameExpandArrow",width=16,height=16,size=20,flip=true}},
+    right={{atlas="common-icon-forwardarrow",size=18},{file="Interface\\ChatFrame\\ChatFrameExpandArrow",width=16,height=16,size=20}},
+}
+function U:NativeIcon(icon,kind)
+    local texture=icon.texture
+    if not texture then
+        texture=icon:CreateTexture(nil,"ARTWORK");icon.texture=texture;texture:SetPoint("CENTER")
+        if texture.SetSnapToPixelGrid then texture:SetSnapToPixelGrid(false) end
+        if texture.SetTexelSnappingBias then texture:SetTexelSnappingBias(0) end
+    end
+    texture:Hide();texture:SetTexture(nil);texture:SetRotation(0);texture:SetVertexColor(1,1,1,1);texture:SetDesaturated(true);icon.asset=nil
+    for _,asset in ipairs(nativeIcons[kind] or {}) do
+        local applied,width,height=false,asset.width,asset.height
+        if asset.atlas and C_Texture and C_Texture.GetAtlasInfo and texture.SetAtlas then
+            local ok,info=pcall(C_Texture.GetAtlasInfo,asset.atlas)
+            if ok and info and M.Number(info.width) and info.width>0 and M.Number(info.height) and info.height>0 then
+                -- SetAtlas returns no success value. pcall status is separate.
+                applied=pcall(texture.SetAtlas,texture,asset.atlas,false,nil,true,"CLAMP","CLAMP")
+                if applied and texture.GetAtlas then applied=texture:GetAtlas()==asset.atlas end
+                width,height=info.width,info.height
+            end
+        elseif asset.file then
+            local ok,result=pcall(texture.SetTexture,texture,asset.file,"CLAMP","CLAMP")
+            applied=ok and result==true
+            if applied then texture:SetTexCoord(asset.flip and 1 or 0,asset.flip and 0 or 1,0,1) end
+        end
+        if applied then
+            local factor=asset.size/math.max(width,height)
+            texture:SetSize(width*factor,height*factor);texture:Show();icon.asset=asset.atlas or asset.file;return true
+        end
+    end
+    texture:SetTexture(nil);return false
+end
 function U:Icon(b,kind)
     b.text:Hide();b.icons=b.icons or {}
+    if nativeIcons[kind] and not b.nativePushed then
+        local pushed=b:CreateTexture(nil,"BACKGROUND",nil,1);pushed:SetColorTexture(0,0,0,.3);pushed:SetAllPoints(b)
+        b:SetPushedTexture(pushed);b.nativePushed=pushed
+    end
     if not b.icons[kind] then
         local icon=CreateFrame("Frame",nil,b);icon:SetSize(20,20);icon:SetPoint("CENTER");b.icons[kind]=icon
         local function line(x1,y1,x2,y2,width)
             local l=icon:CreateLine(nil,"ARTWORK");l:SetThickness(width or 2);l:SetColorTexture(.95,.96,.98,1)
             l:SetStartPoint("CENTER",icon,x1,y1);l:SetEndPoint("CENTER",icon,x2,y2)
         end
-        if kind=="cog" then
-            local texture=icon:CreateTexture(nil,"ARTWORK");texture:SetAllPoints(icon);texture:SetTexture(MEDIA.."cog.tga");texture:SetVertexColor(.95,.96,.98,1);icon.texture=texture
-        elseif kind=="back" then
-            line(5,6,5,-1,2.8);line(5,-1,3,-3,2.8);line(3,-3,-6,-3,2.8)
-            line(-6,-3,-1,2,2.8);line(-6,-3,-1,-8,2.8)
-        elseif kind=="location" then
-            for i=0,11 do
-                local a,b=i*math.pi/6,(i+1)*math.pi/6
-                line(math.cos(a)*5,math.sin(a)*5,math.cos(b)*5,math.sin(b)*5,1.5)
-            end
-            line(-8,0,-3,0,1.5);line(3,0,8,0,1.5);line(0,-8,0,-3,1.5);line(0,3,0,8,1.5)
-        elseif kind=="left" or kind=="right" then
-            local sign=kind=="left" and 1 or -1
-            for x=-5,5 do local height=(x+5)*.7;line(x*sign,-height,x*sign,height,1.5) end
+        if nativeIcons[kind] then
+            icon.nativeAvailable=self:NativeIcon(icon,kind)
         elseif kind=="pause" then line(-3,5,-3,-5,3);line(3,5,3,-5,3)
         elseif kind=="play" then line(-4,6,5,0);line(5,0,-4,-6);line(-4,-6,-4,6)
         elseif kind=="done" then line(-6,0,-2,-4);line(-2,-4,6,5)
         else line(-4,4,4,-4);line(-4,-4,4,4) end
     end
     for name,icon in pairs(b.icons) do icon:SetShown(name==kind) end
+    if nativeIcons[kind] and not b.icons[kind].nativeAvailable then
+        -- An unexpected missing client asset must not leave an invisible action.
+        b.text:SetText(({cog="S",back="<",location="+",left="<",right=">"})[kind]);b.text:Show()
+    end
     b.iconKind=kind
 end
 function U:PauseIcon(c)
@@ -403,8 +438,10 @@ function U:Create(c)
     end)
     self:PauseIcon(c)
     self.fold=self:Button(f,"Fold",14,-125,50,30,function() c.compact=true;c:Refresh() end)
-    local handle=CreateFrame("Button",nil,UIParent);self.handle=handle;handle:SetSize(24,64);handle:SetFrameStrata("MEDIUM");self:Rectangle(handle)
+    local handle=CreateFrame("Button",nil,UIParent);self.handle=handle;handle:SetSize(24,64);handle:SetFrameStrata("MEDIUM")
+    handle.bg=self:Rectangle(handle,{.13,.14,.17,1});handle.normalColor={.13,.14,.17,1};handle.hoverColor={.22,.24,.28,1}
     handle.text=self:Text(handle,">",16,0,0,24,64);handle.text:SetJustifyH("CENTER");handle:SetScript("OnClick",function() c.tucked=false;self:Layout(c) end)
+    self:Tip(handle,"Expand navigation")
     local grip=CreateFrame("Button",nil,f);self.resizeGrip=grip;grip:SetSize(18,18);grip:SetPoint("BOTTOMRIGHT",f,"BOTTOMRIGHT",-1,1);grip:SetFrameLevel(f:GetFrameLevel()+10)
     for _,length in ipairs({4,8,12}) do
         local line=grip:CreateLine(nil,"ARTWORK");line:SetThickness(1.5);line:SetColorTexture(.75,.76,.8,1)
