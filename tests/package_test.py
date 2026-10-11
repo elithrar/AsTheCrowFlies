@@ -5,6 +5,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -14,7 +15,9 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE_ONLY = '--source-only' in sys.argv
-VERSION = '0.1.0'
+VERSION = re.search(r'^## Version: (.+)$',
+                    (ROOT / 'AsTheCrowFlies/AsTheCrowFlies.toc').read_text(encoding='utf-8'),
+                    re.M).group(1)
 TAXI_SHA256 = 'e74250e6ed1ea8cf69e3869e161135bb1bbba195ba794f5e0ccd78fc30320db7'
 TOC_FILES = ['Model.lua', 'Settings.lua', 'Data/Registry.lua', 'Data/Taxi.lua',
              'Routes.lua', 'Navigation.lua', 'Adapter.lua', 'Providers.lua',

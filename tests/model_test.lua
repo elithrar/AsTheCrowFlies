@@ -392,6 +392,46 @@ test('nested colors and nonfinite settings are sanitized independently',function
     p.colors.text[2]=.8;assert(input.colors.text[2]==.4)
 end)
 
+test('narrow panel default migrates once without changing custom widths',function()
+    local defaults=S.Load(nil)
+    assert(defaults.width==240 and defaults.layoutVersion==2 and S.minWidth==220 and S.maxWidth==640)
+    local legacy={version=1,width=304};local migrated=S.Load(legacy)
+    assert(migrated.width==240 and migrated.layoutVersion==2 and legacy.width==304 and legacy.layoutVersion==nil)
+    assert(S.Load({width=304,layoutVersion=1}).width==240 and S.Load({width=304,layoutVersion=0/0}).width==240)
+    for _,width in ipairs({220,280,299,305,640}) do
+        local p=S.Load({width=width});assert(p.width==width and p.layoutVersion==2)
+    end
+    migrated.width=304;assert(S.Load(migrated).width==304)
+    assert(S.Load({width=304,layoutVersion=2}).width==304)
+    assert(S.Load({width=-1}).width==S.minWidth and S.Load({width=999}).width==S.maxWidth)
+end)
+
+test('dock position and frame layer sanitize malformed saved preferences',function()
+    local p=S.Load(nil);assert(p.dockPosition==.5 and p.strata=='HIGH')
+    for _,value in ipairs({0,.1,.5,.9,1}) do assert(S.Load({dockPosition=value}).dockPosition==value) end
+    assert(S.Load({dockPosition=-.4}).dockPosition==0 and S.Load({dockPosition=1.4}).dockPosition==1)
+    for _,value in ipairs({0/0,math.huge,-math.huge,'0.25',false,{}}) do
+        assert(S.Load({dockPosition=value}).dockPosition==.5)
+    end
+    for _,value in ipairs({'LOW','MEDIUM','HIGH'}) do assert(S.Load({strata=value}).strata==value) end
+    for _,value in ipairs({'BACKGROUND','DIALOG','TOOLTIP','low','',3,false,{}}) do assert(S.Load({strata=value}).strata=='HIGH') end
+end)
+
+test('layout migration and dock preferences remain isolated across profile operations',function()
+    local source={version=1,active='Custom',profiles={Default={width=304},Custom={width=420,dock='right',dockPosition=.2,strata='LOW'}}}
+    local store=S.Profiles(source)
+    assert(store.profiles.Default.width==240 and store.profiles.Custom.width==420)
+    assert(source.profiles.Default.width==304 and source.profiles.Default.layoutVersion==nil)
+    local duplicate=S.DuplicateProfile(store,'Other')
+    assert(duplicate.dock=='right' and duplicate.dockPosition==.2 and duplicate.strata=='LOW')
+    duplicate.width=304;duplicate.dockPosition=.8;duplicate.strata='MEDIUM'
+    local custom=S.SwitchProfile(store,'Custom');assert(custom.dockPosition==.2 and custom.strata=='LOW' and custom.width==420)
+    local copied=S.CopyProfile(store,'Other');assert(copied.width==304 and copied.dockPosition==.8 and copied.strata=='MEDIUM')
+    local reloaded=S.Profiles(store);assert(reloaded.profiles.Custom.width==304 and reloaded.profiles.Custom.dockPosition==.8)
+    local reset=S.ResetProfile(reloaded);assert(reset.width==240 and reset.layoutVersion==2 and reset.dockPosition==.5 and reset.strata=='HIGH')
+    assert(reloaded.profiles.Other.width==304 and reloaded.profiles.Other.dockPosition==.8 and reloaded.profiles.Other.strata=='MEDIUM')
+end)
+
 test('profile switch copy duplicate reset preserve names and independent values',function()
     local store=S.Profiles(nil,{scale=1.1});local original=store.profiles.Default
     local night=S.DuplicateProfile(store,' Night ');assert(night and store.active=='Night' and night~=original)
@@ -423,7 +463,10 @@ test('future settings and profile stores are protected from mutation',function()
     local nested={version=1,active='Default',profiles={Default={version=2,unknown='keep'}}}
     local _,nestedReadOnly=S.Profiles(nested,{});assert(nestedReadOnly and nested.profiles.Default.unknown=='keep')
     local _,legacyReadOnly=S.Profiles(nil,{version=2});assert(legacyReadOnly)
-    local p,pReadOnly=S.Load({version=2,colors={accent={0,0,0}}});assert(pReadOnly and p.colors.accent[1]==S.defaults.colors.accent[1])
+    local futureProfile={version=2,width=304,layoutVersion=1,dockPosition=.8,strata='TOOLTIP',colors={accent={0,0,0}}}
+    local p,pReadOnly=S.Load(futureProfile);assert(pReadOnly and p.colors.accent[1]==S.defaults.colors.accent[1])
+    assert(p.width==240 and p.dockPosition==.5 and p.strata=='HIGH')
+    assert(futureProfile.width==304 and futureProfile.layoutVersion==1 and futureProfile.dockPosition==.8 and futureProfile.strata=='TOOLTIP')
     p.colors.accent[1]=0;assert(S.defaults.colors.accent[1]~=0)
 end)
 print('PASS model scenarios: '..count)

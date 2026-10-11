@@ -1,5 +1,6 @@
 local _,N=...; local M=N.Model; local S={}; N.Settings=S
-S.defaults={version=1,width=304,resultsHeight=296,scale=1,font="Expressway",fontSize=13,locked=false,dock="none",x=24,y=-180,mapMarkers=true,minimapMarkers=true,flightPrior=32,routeOrder="distance",
+S.minWidth=220;S.maxWidth=640
+S.defaults={version=1,layoutVersion=2,width=240,resultsHeight=296,scale=1,font="Expressway",fontSize=13,locked=false,dock="none",dockPosition=.5,strata="HIGH",x=24,y=-180,mapMarkers=true,minimapMarkers=true,flightPrior=32,routeOrder="distance",
     colors={background={.045,.048,.062},accent={.78,.85,.61},text={.93,.94,.97}},searchFilters={categories={},classes={},professions={}}}
 function S.Filters(saved)
     saved=type(saved)=="table" and saved or {};local clean={categories={},classes={},professions={}}
@@ -18,17 +19,22 @@ function S.Load(saved,build)
     if type(saved.version)=="number" and saved.version>1 then return M.Copy(S.defaults),true end
     local p=M.Copy(S.defaults)
     for k,d in pairs(p) do if type(d)~="table" and type(saved[k])==type(d) then p[k]=saved[k] end end
+    -- Only the former default narrows on upgrade. Once marked, a user can
+    -- deliberately choose 304 again without another migration on reload.
+    if (not M.Number(saved.layoutVersion) or saved.layoutVersion<2) and saved.width==304 then p.width=S.defaults.width end
     -- Split the former shared toggle without re-enabling markers a user hid.
     -- Explicit new preferences take precedence when loading mixed-version data.
     for _,key in ipairs({"mapMarkers","minimapMarkers"}) do
         if type(saved[key])~="boolean" and saved.overlays==false then p[key]=false end
     end
-    for _,k in ipairs({"width","resultsHeight","scale","fontSize","x","y","flightPrior"}) do if not M.Number(p[k]) then p[k]=S.defaults[k] end end
-    p.width=math.max(280,math.min(640,p.width));p.resultsHeight=math.max(100,math.min(560,p.resultsHeight)); p.scale=math.max(.5,math.min(1.6,p.scale))
+    for _,k in ipairs({"width","resultsHeight","scale","fontSize","x","y","flightPrior","dockPosition"}) do if not M.Number(p[k]) then p[k]=S.defaults[k] end end
+    p.width=math.max(S.minWidth,math.min(S.maxWidth,p.width));p.resultsHeight=math.max(100,math.min(560,p.resultsHeight)); p.scale=math.max(.5,math.min(1.6,p.scale))
+    p.dockPosition=math.max(0,math.min(1,p.dockPosition))
     p.fontSize=math.floor(math.max(10,math.min(18,p.fontSize)))
     p.flightPrior=math.max(10,math.min(60,p.flightPrior))
     p.x=math.max(-20000,math.min(20000,p.x));p.y=math.max(-20000,math.min(20000,p.y))
     if p.dock~="left" and p.dock~="right" then p.dock="none" end
+    if p.strata~="LOW" and p.strata~="MEDIUM" and p.strata~="HIGH" then p.strata=S.defaults.strata end
     if p.routeOrder~="time" then p.routeOrder="distance" end
     if #p.font==0 or #p.font>128 or p.font:find("%c") then p.font="Expressway" end
     local colors=type(saved.colors)=="table" and saved.colors or {}
@@ -37,7 +43,7 @@ function S.Load(saved,build)
         for i=1,3 do p.colors[name][i]=M.Number(rgb[i]) and math.max(0,math.min(1,rgb[i])) or default[i] end
     end
     p.searchFilters=S.Filters(saved.searchFilters)
-    p.version=1
+    p.version=1;p.layoutVersion=2
     return p,false
 end
 local function profileName(name)
