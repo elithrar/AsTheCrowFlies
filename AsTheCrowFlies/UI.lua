@@ -491,9 +491,14 @@ function U:Layout(c)
     local function move(control,x,y) control:ClearAllPoints();control:SetPoint("TOPLEFT",x,y) end
     self.header:SetWidth(p.width-78);self.title:SetWidth(p.width-124)
     move(self.settings,p.width-68,-9);move(self.tuck,p.width-38,-9);move(self.current,p.width-38,-2)
-    self.from:SetWidth(p.width-104);self.to:SetWidth(p.width-104);self.body:SetWidth(p.width-28);self.bodyScroll:SetWidth(p.width-28)
+    local labelWidth=0
+    for _,label in ipairs(self.fieldLabels) do labelWidth=math.max(labelWidth,label:GetUnboundedStringWidth()) end
+    labelWidth=math.min(math.ceil(labelWidth)+2/math.max(.1,f:GetEffectiveScale()),p.width-164)
+    local fieldLeft=14+labelWidth+8
+    for _,label in ipairs(self.fieldLabels) do label:SetWidth(labelWidth) end
+    move(self.from,fieldLeft,0);move(self.to,fieldLeft,-40)
+    self.from:SetWidth(p.width-fieldLeft-42);self.to:SetWidth(p.width-fieldLeft-42);self.body:SetWidth(p.width-28);self.bodyScroll:SetWidth(p.width-28)
     move(self.filterButton,p.width-38,-42);self.note:SetWidth(p.width-28)
-    local goWidth=p.width-(c.nav.route and 124 or 88);self.go:SetWidth(goWidth);self.go.text:SetWidth(goWidth-16)
     self.guidance:SetWidth(p.width-28);self.next:SetWidth(p.width-72);self.remaining:SetWidth(p.width-72);self.directionNote:SetWidth(p.width-28)
     self.expand:SetWidth(p.width-96);self.expand.text:SetWidth(p.width-112)
     for _,row in ipairs(self.rows) do row:SetWidth(p.width-28);row.lockedText:SetWidth(p.width-40) end
@@ -661,9 +666,15 @@ function U:Refresh(c)
         end
         self.note:ClearAllPoints();self.note:SetPoint("TOPLEFT",14,-y)
         local footer=y+messageHeight
-        self.go:ClearAllPoints();self.go:SetPoint("TOPLEFT",c.nav.route and 74 or 44,-footer);self.stop:ClearAllPoints();self.stop:SetPoint("TOPLEFT",c.profile.width-42,-footer)
-        self.fold:ClearAllPoints();self.fold:SetPoint("TOPLEFT",14,-footer)
         self.go.text:SetText(c:PrimaryActionLabel());self.go:SetEnabled(not c.searching and not (c.matches and #c.matches==0))
+        local available=c.profile.width-(c.nav.route and 124 or 28)
+        local labelWidth=math.ceil(self.go.text:GetUnboundedStringWidth())
+        local goWidth=math.min(available,labelWidth+32)
+        local inset=math.min(16,math.max(4,(goWidth-labelWidth)/2))
+        self.go:SetWidth(goWidth);self.go.text:ClearAllPoints();self.go.text:SetPoint("TOPLEFT",inset,0);self.go.text:SetWidth(goWidth-inset*2)
+        self.go:ClearAllPoints();self.go:SetPoint("TOPLEFT",(c.nav.route and 74 or 14)+(available-goWidth)/2,-footer)
+        self.stop:ClearAllPoints();self.stop:SetPoint("TOPLEFT",c.profile.width-42,-footer)
+        self.fold:ClearAllPoints();self.fold:SetPoint("TOPLEFT",14,-footer)
         if not self.resizing then self.frame:SetHeight(expanded and (footer+(hasFooter and 42 or 12)) or 129) end
     end
     self:Layout(c)

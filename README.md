@@ -1,6 +1,6 @@
 # As The Crow Flies
 
-**[Development preview](https://github.com/elithrar/AsTheCrowFlies/pull/1)** — no public release yet.
+Version **0.1.0** for World of Warcraft: Forever. See [GitHub releases](https://github.com/elithrar/AsTheCrowFlies/releases) for published packages.
 
 A compact navigation island that helps you find a destination, compare walking and flight estimates, and follow the next useful direction.
 
@@ -9,11 +9,11 @@ A compact navigation island that helps you find a destination, compare walking a
 - Flight candidates use your discovered nodes and are checked against the departure flight master's offered itinerary. Choose Distance or Estimated time in settings; movement and buying flights stay manual.
 - Per-character profiles, font family and size, scale and colors, and a dockable, resizable panel with matching expanded and collapsed widths. Expressway uses installed SharedMedia, with one shared game-font fallback across the panel and options. Matching bold fonts are used when available. Options / Profiles use XPIsland's native controls, bordered sections, gold headings and compact spacing; their control text stays a fixed size while island text size changes.
 
-For World of Warcraft: Forever, build **1.60.1.70338**. Ground directions are compass bearings, not obstacle-avoiding paths. Ground ETA includes an uncalibrated 35% detour allowance. Flight estimates are uncalibrated until measured; boats, portals and cross-continent routes are not supported. This development build has been tested offline and still needs an in-game smoke test.
+For World of Warcraft: Forever, build **1.60.1.70338**. Ground directions are compass bearings, not obstacle-avoiding paths. Ground ETA includes an uncalibrated 35% detour allowance. Flight estimates are uncalibrated until measured; boats, portals and cross-continent routes are not supported. Automated tests run offline and do not establish native rendering or real taxi-journey accuracy.
 
 ## Installation
 
-Copy the `AsTheCrowFlies` folder from your development package into your Forever client's `Interface/AddOns` directory, then restart WoW. The folder should contain `AsTheCrowFlies.toc` directly.
+Copy the `AsTheCrowFlies` folder from the release ZIP into your Forever client's `Interface/AddOns` directory. Restart WoW for a first installation, or use `/reload` when updating an already loaded addon. The folder should contain `AsTheCrowFlies.toc` directly.
 
 Type `/atcf`, `/atcf options` or `/atcf opts` to open settings. Use `/atcf show` and `/atcf hide` for the panel, `/atcf stop` to stop directions, and `/atcf remember My place` to save your current location. Enter accepts a search result; Enter again finds routes. The cog opens the settings/tools menu; the return arrow goes back while preserving active directions. Choose Left or Right screen edge under Position, or unlock and drag the header to either edge to dock and hide. Click the solid-arrow edge tab to reopen. WoW's Keybindings also offers "Expand / collapse navigation".
 
@@ -23,7 +23,7 @@ Selecting a destination previews its crow marker before Go. World/zone-map marke
 
 Routes needing explicitly undiscovered flight points are darkened, marked in red and cannot be started. Usable routes come first. Unknown observations stay distinct; an offered itinerary can legitimately fly through an undiscovered intermediate point. Switching profiles never shares flight discovery between characters.
 
-NPC search uses the installed **QuestieDB contract 3, Forever flavor**. The local development package includes taxi data extracted from your matching client. The source package includes neither that payload nor an NPC database. Missing, phased and moving NPC locations are not treated as verified destinations.
+NPC search uses the installed **QuestieDB contract 3, Forever flavor**. The verified Forever flight graph is included in both the source and release packages; no NPC database is bundled. Missing, phased and moving NPC locations are not treated as verified destinations.
 
 ## Screenshots
 
@@ -35,10 +35,12 @@ Open an issue first. Include the Forever build and a reproducible route or UI pr
 
 ## Development
 
-In a source checkout, install `lupa==2.8` into `.work/pydeps`, then run `python tests/run.py`, `python tests/package_test.py --source-only`, and `python tools/package.py` from the repository root. The package is written to `dist/`.
+In a source checkout, install `lupa==2.8` into `.work/pydeps`, then run `python tests/run.py`, `python tests/release_test.py`, and `python tests/package_test.py --source-only`. Build the complete release ZIP with `python tools/package.py --release`; output is written to `dist/`. Package checks reject missing or changed flight data.
+
+See [release instructions](docs/RELEASING.md) for annotated tags, stable version classification and CurseForge setup. Building a ZIP does not publish it.
 
 See [behavior details](docs/BEHAVIOR.md), [data coverage](docs/COVERAGE.md), and [validation coverage](docs/VALIDATION.md), including the in-game checks still needed.
 
 ## License
 
-An implementation license has not yet been selected. See [notices](NOTICES.md) for code and local client-data boundaries; this development draft grants no redistribution rights.
+The addon has no open-source redistribution grant. See [notices](NOTICES.md) for code, data and build-tool attribution. Release automation adapted from XPIsland retains its BSD-3-Clause notice in `tools/XPISLAND-LICENSE.txt`.

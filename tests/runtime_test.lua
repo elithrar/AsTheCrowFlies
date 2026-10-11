@@ -466,7 +466,7 @@ test('bounded trainer results retain width across compact state and reflow profi
         local physical=U.frame:GetWidth()*U.frame:GetScale()
         assert(U.frame:GetHeight()*U.frame:GetScale()<=720 and U.rows[3].detail:GetHeight()>0)
         assert(U.header:GetWidth()<U.settings.point[2] and U.settings:GetFrameLevel()>U.header:GetFrameLevel())
-        assert(U.from:GetWidth()==width-104 and U.body:GetWidth()==width-28 and U.filterButton.point[2]==width-38)
+        assert(U.from.point[2]+U.from:GetWidth()==width-42 and U.body:GetWidth()==width-28 and U.filterButton.point[2]==width-38)
         assert(U.fold:IsShown() and U.fold.point[2]+U.fold:GetWidth()<U.go.point[2])
         assert(U.rows[1].name:GetWidth()+10<=U.rows[1]:GetWidth()-8-U.rows[1].go:GetWidth())
         C.compact=true;C:Refresh();assert(U.frame:GetWidth()*U.frame:GetScale()==physical)
@@ -931,18 +931,34 @@ test('matching bold weight is validated cached and downgraded without losing the
 end)
 
 test('editor labels fields action buttons and route action share consistent alignment at supported widths',function()
-    C:Stop();local savedWidth=C.profile.width;C.destination=nil;C.status=nil;C.matches={}
-    for _,width in ipairs({280,304,460,640}) do
-        C.profile.width=width;C:Refresh()
+    C:Stop();local saved={profile=N.Model.Copy(C.profile),filter=C.filter,searchOrigin=C.searchOrigin};C.destination=nil;C.status=nil;C.matches={}
+    for _,width in ipairs({280,304,460,640}) do for _,size in ipairs({10,13,18}) do for _,scale in ipairs({.5,1,1.6}) do
+        C.profile.width=width;C.profile.fontSize=size;C.profile.scale=scale;C:ApplyProfile()
         assert(U.current.point[2]==U.filterButton.point[2] and U.current:GetWidth()==U.filterButton:GetWidth())
         assert(U.current.point[2]+U.current:GetWidth()==width-14 and U.tuck.point[2]==U.current.point[2])
         assert(U.from:GetWidth()==U.to:GetWidth() and U.from.point[2]+U.from:GetWidth()+4==U.current.point[2])
         assert(U.current.point[3]-U.current:GetHeight()/2==U.from.point[3]-U.from:GetHeight()/2)
         assert(U.filterButton.point[3]-U.filterButton:GetHeight()/2==U.to.point[3]-U.to:GetHeight()/2)
+        for _,label in ipairs(U.fieldLabels) do
+            assert(label:GetWidth()>=label:GetUnboundedStringWidth())
+            assert(math.abs(label.point[2]+label:GetWidth()+8-U.from.point[2])<.0001)
+        end
+        assert(U.fieldLabels[1]:GetWidth()==U.fieldLabels[2]:GetWidth())
         assert(U.fieldLabels[1].point[3]-U.fieldLabels[1]:GetHeight()/2==U.from.point[3]-U.from:GetHeight()/2)
-        assert(U.go.point[2]+U.go:GetWidth()/2==width/2 and U.go.text.justifyH=='CENTER')
-    end
-    C.profile.width=savedWidth;C:Stop();C:Refresh()
+        for _,label in ipairs({'Find routes','Use origin','Compare matches'}) do
+            C.searchOrigin=label=='Use origin';C.filter={categories=label=='Compare matches' and {place=true} or {},classes={},professions={}};C:Refresh()
+            assert(U.go.text:GetText()==label and U.go:GetHeight()==30 and U.go.text.justifyH=='CENTER')
+            assert(U.go.point[2]+U.go:GetWidth()/2==width/2)
+            local textWidth=U.go.text:GetUnboundedStringWidth()
+            assert(U.go:GetWidth()>=textWidth+32-.0001 and U.go:GetWidth()<=textWidth+33,'footer fits the label with comfortable padding: '..U.go:GetWidth()..' / '..textWidth)
+            assert(U.go.text:GetWidth()>=textWidth and U.go.point[2]>=14 and U.go.point[2]+U.go:GetWidth()<=width-14)
+        end
+    end end end
+    local measure=U.fieldLabels[1].GetUnboundedStringWidth;local actionMeasure=U.go.text.GetUnboundedStringWidth
+    U.fieldLabels[1].GetUnboundedStringWidth=function() return 1000 end;U.go.text.GetUnboundedStringWidth=function() return 1000 end
+    C.profile.width=280;C:Refresh();assert(U.from:GetWidth()>=100 and U.go:GetWidth()==252 and U.go.text:GetWidth()<=U.go:GetWidth())
+    U.fieldLabels[1].GetUnboundedStringWidth=measure;U.go.text.GetUnboundedStringWidth=actionMeasure
+    C.profile=saved.profile;C.filter=saved.filter;C.searchOrigin=saved.searchOrigin;C:Stop();C:ApplyProfile()
 end)
 test('map and minimap preferences default on migrate explicit opt outs and remain independent',function()
     local S=N.Settings
@@ -1007,7 +1023,9 @@ test('primary action selects and plans once while origin and category actions st
     assert(C.destination==b and #C.results==1 and C.results[1].destination==b and not C.nav.route)
     assert(not U.to:HasFocus() and U.to:GetText()==b.name)
     C:Go();local active=C.nav.route;C.compact=false;C:Search('Action A',true);flushSearch()
-    U.from:SetText('Act');U.from:SetFocus();assert(U.go.text:GetText()=='Use origin');U.go.scripts.OnClick()
+    U.from:SetText('Act');U.from:SetFocus();assert(U.go.text:GetText()=='Use origin')
+    assert(U.go.point[2]>=74 and U.go.point[2]+U.go:GetWidth()<=U.stop.point[2]-8 and U.go.text:GetWidth()>=U.go.text:GetUnboundedStringWidth())
+    U.go.scripts.OnClick()
     assert(C.origin==a and C.destination==b and #C.results==0 and C.nav.route==active)
     assert(not U.from:HasFocus() and U.from:GetText()==a.name)
     C:Plan();C:Go();assert(C.origin==nil and C.nav.route==active and C.status:find('Review, then Go',1,true),'preview origin still requires current-location review')

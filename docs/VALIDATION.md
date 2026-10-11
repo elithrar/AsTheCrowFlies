@@ -1,6 +1,6 @@
 # Validation and acceptance status
 
-This is a development candidate, not a supported live release. The user directly authorized updating the pull request and replacing the local Forever addon, resolving the earlier approval blocker. Build **56b3a71** was installed and file-verified in the preceding iteration. Source review and offline tests for this follow-up are complete. The exact committed package and installed-file receipt are recorded in the task outputs and pull request after installation. SavedVariables, unrelated addons and existing backups remain outside the replacement scope; the user requested no new development backup.
+Version **0.1.0** is prepared as the first stable release. The user authorized updating and merging the pull request and replacing the local Forever addon. The release workflow publishes only an explicitly pushed annotated version tag reachable from main; merging alone does not publish. Source review and offline tests are complete. The exact committed package and installed-file receipt are recorded in the task outputs and pull request after installation. SavedVariables, unrelated addons and existing backups remain outside the replacement scope; the user requested no new development backup.
 
 The supplied in-game screenshots were inspected and used to identify UI defects. A read-only native capture showed the previously installed idle panel; it does not verify this candidate's route cards. No in-game rendering test or live routing journey is claimed for this candidate. Installation and file verification establish payload integrity, not native visual or gameplay correctness.
 
@@ -28,14 +28,20 @@ Earlier integration checks cover role-vs-name relevance, exact names, prefixes, 
 
 | Milestone | Status |
 | --- | --- |
-| M0 client/data proof | Extraction/schema/API source proof complete; live taxi/coordinate probes and public data-rights gate open. |
+| M0 client/data proof | Extraction/schema/API source proof complete; the verified static flight graph is included in source and release packages. Live taxi/coordinate probes remain unverified. |
 | M1 complete destination flow | Implemented and exercised offline. Native visual/focus smoke test pending. |
 | M2 multimodal routing | Candidate graph, observation gates, distance/time alternatives and flight lifecycle implemented; boats/portals lack passenger semantics; real faction journeys/calibration pending. |
 | M3 credible ground corridors | Blocked on independently verified corridor/entrance evidence. Zero supplied; bearing-only fallback is explicit. |
-| M4 overlays/polish/release | Flight polylines, marker overlays, shared typography, native options controls, scrollable/resizable results and docking implemented; native geometry/font/interop checks pending; exact package/install status is recorded with the final receipt. No public release requested. |
+| M4 overlays/polish/release | Flight polylines, marker overlays, shared typography, native options controls, scrollable/resizable results and docking implemented. Stable v0.1.0 packaging and tag-triggered GitHub/CurseForge workflows are prepared; native geometry/font/interop checks remain unverified. |
 
 ## Required live checks before support claims
 
 On the matching Forever client, verify API availability/restrictions on build 70338; NPC provider indexing; native transform/facing cardinal calibration; actual flight map ID behavior; current-master slot/ID reconciliation and TakeTaxiNode observation; multi-hop travel for each faction including undiscovered fly-through nodes; wrong flight and early landing; loading/death/reload; real timings; selected-destination previews, map pan/floors, independent map/minimap controls and minimap rotation/zoom/shapes; Expressway registration/fallback and matching bold weight; native dropdown/checkbox fonts after reopening options; keyboard focus and all 40 results; 720p through ultrawide and fractional UI scales; dragging/resizing/snap/tuck; combat behavior; XPIsland/Questie coexistence; and actual CPU/memory growth. These are support/behavior checks, not a request for renewed installation permission.
 
-No public release, merge, data-rights grant or live support claim is made by the draft PR. The main wow-addon-development skill was read; all seven linked reference resources failed to resolve, so matching shipped-source documentation and installed working examples supplied the contract evidence instead.
+Preparing a stable version and release automation does not establish an in-game support claim or grant rights to third-party data. The main wow-addon-development skill was read in the earlier implementation work; all seven linked reference resources failed to resolve, so matching shipped-source documentation and installed working examples supplied the contract evidence instead.
+
+## Stable packaging and final spacing, 2026-10-11
+
+The current run passes 117 Lua 5.1 scenarios (43 model, 74 mocked runtime), five exact-client data checks, 19 release guard tests and six package tests. Source-only CI passes five package tests and intentionally skips the private override test. Actionlint 1.7.12 reports no workflow errors. Footer widths follow measured labels plus padding; From/To fields follow the widest label with an eight-pixel gap. Existing runtime scenarios exercise width, font-size and scale combinations, unusually wide measurements and navigation footer boundaries.
+
+Both source and release builds now include the same 349,728-byte flight payload (98 candidate nodes, 294 directed paths). The 22-file stable ZIP is reproducible, validates the committed data checksum and rejects an empty development stub. Release tests cover version/flavor/project binding, annotated tags on main, immutable assets, partial GitHub-release recovery and duplicate/ambiguous CurseForge-upload handling. Independent packaging and release integration re-review found no remaining actionable source/offline issue. No WoW interaction or actual upload was used for this validation.

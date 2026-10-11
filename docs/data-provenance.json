@@ -210,6 +210,6 @@
   ],
   "payloadSHA256": "e74250e6ed1ea8cf69e3869e161135bb1bbba195ba794f5e0ccd78fc30320db7",
   "hotfixes": "Not applied: candidate-only graph; runtime offered-itinerary validation required",
-  "rights": "Local development payload only; no redistribution license inferred",
+  "rights": "Derived static flight graph included in source and release packages; no third-party redistribution license inferred",
   "groundCorridors": 0
 }
