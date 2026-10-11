@@ -20,7 +20,16 @@ function methods:Show() local changed=self.shown==false;self.shown=true;if chang
 function methods:Hide() local changed=self.shown~=false;self.shown=false;if changed and self.scripts.OnHide then self.scripts.OnHide(self) end end
 function methods:SetShown(v) if v then self:Show() else self:Hide() end end
 function methods:IsShown() return self.shown~=false end
-function methods:SetText(v) self.text=v end
+function methods:SetText(v,r,g,b,a,wrap)
+    self.text=v
+    if self.kind=='GameTooltip' and self.TextLeft1 then
+        local line=self.TextLeft1;line:SetText(v);line:SetTextColor(r,g,b,a);line:SetWordWrap(wrap)
+        -- Native tooltip sizing happens when content is populated; capture the
+        -- owned line's font at that point rather than after Show or SetFont.
+        local path,size,flags=line:GetFont()
+        self.measuredText={path=path,size=size,flags=flags,width=line:GetUnboundedStringWidth(),color={r,g,b,a},wrap=wrap}
+    end
+end
 function methods:SetTextColor(...) self.textColor={...} end
 function methods:GetText() return self.text or '' end
 function methods:SetFont(path,size,flags)
@@ -96,7 +105,9 @@ function methods:ClearFocus() self.focus=false end
 function methods:SetFocus() self.focus=true end
 function methods:SetChecked(v) self.checked=v end
 function methods:GetChecked() return self.checked end
-local noop={'SetAllPoints','SetShadowColor','SetShadowOffset','SetAutoFocus','SetMaxLetters','SetTextInsets','HighlightText','SetMovable','EnableMouse','SetClampedToScreen','RegisterForDrag','EnableMouseWheel','SetOwner','SetDrawLayer'}
+function methods:SetOwner(owner,anchor) self.tooltipOwner=owner;self.tooltipAnchor=anchor end
+function methods:GetOwner() return self.tooltipOwner end
+local noop={'SetAllPoints','SetShadowColor','SetShadowOffset','SetAutoFocus','SetMaxLetters','SetTextInsets','HighlightText','SetMovable','EnableMouse','SetClampedToScreen','RegisterForDrag','EnableMouseWheel','SetDrawLayer'}
 for _,name in ipairs(noop) do methods[name]=function() end end
 function GetCursorPosition() return cursorX,cursorY end
 local function object(name)
@@ -112,7 +123,11 @@ function methods:CreateFontString() local text=object();text.parent=self;return 
 function CreateFont(name) return object(name) end
 function CreateFrame(kind,name,parent,template)
     local f=object(name);f.parent=parent;f.kind=kind;f.template=template
-    if kind=='DropdownButton' or template=='UICheckButtonTemplate' then f.Text=object();f.Text.parent=f end;return f
+    if kind=='DropdownButton' or template=='UICheckButtonTemplate' then f.Text=object();f.Text.parent=f end
+    if template=='SharedTooltipTemplate' then
+        f.TextLeft1=object();f.TextLeft1.parent=f;f.TextLeft1:SetFont('native',14,'');f:SetFrameStrata('TOOLTIP');f:Hide()
+    end
+    return f
 end
 UIParent=object();UIParent:SetSize(1920,1080);Minimap=object();Minimap:SetSize(180,180)
 WorldMapFrame=object();local canvas=object();canvas:SetSize(1000,700)
@@ -1352,5 +1367,62 @@ test('missing native artwork keeps a visible usable action and gear atlas fallba
     U:Icon(button,'filter');assert(button.text:IsShown() and button.text:GetText()=='F' and not button.icons.filter.texture:IsShown())
     U:Icon(button,'cog');assert(not button.text:IsShown() and button.icons.cog.texture:IsShown())
     methods.SetTexture=setTexture;C_Texture=old
+end)
+test('search and route rows share one quiet measured tooltip without changing the global tooltip',function()
+    C:Stop();C:ShowPanel(true);local saved=N.Model.Copy(C.profile)
+    C.profile.font='Arial';C.profile.fontSize=18;C.profile.scale=1.6;C:ApplyProfile()
+    local p=A.Position();local goal=N.Model.Copy(p)
+    goal.id='tip-target';goal.name='Trainer with noisy metadata';goal.x=p.x+120;goal.source='QuestieDB';goal.category='class';goal.role='Warrior Trainer';goal.zone='Ironforge'
+    goal.confidence='provider';goal.mobile=true;goal.phase=7;goal.faction='Alliance';goal.questStarts=4;goal.questEnds=2
+    local route=N.Routes.Summary({{mode='walk',start=p,finish=goal,distance=120,seconds=30}},goal,C:Context())
+    route.unavailable='undiscovered';route.conditional=true
+    local originals={}
+    for _,name in ipairs({'SetOwner','SetText','Show','Hide','SetFontObject'}) do
+        originals[name]=rawget(GameTooltip,name)
+        GameTooltip[name]=function() error('row tooltip must not mutate global GameTooltip') end
+    end
+    local function checkRow()
+        local row=U.rows[1];row.scripts.OnEnter()
+        local tip=U.rowTooltip;local line=tip.TextLeft1;local measured=tip.measuredText
+        assert(tip:GetText()=='Travel time may vary based on terrain.' and line:GetText()==tip:GetText())
+        assert(tip:GetOwner()==row and tip:IsShown() and tip.tooltipAnchor=='ANCHOR_RIGHT')
+        assert(tip.template=='SharedTooltipTemplate' and tip.parent==UIParent and tip:GetEffectiveScale()==UIParent:GetEffectiveScale())
+        assert(measured.path=='Fonts\\ARIALN.TTF' and measured.size==11 and measured.flags=='','native measurement uses the small regular font before population')
+        assert(measured.width>0 and measured.wrap and measured.color[4]==1)
+        assert(line.textColor[1]==.76 and line.textColor[2]==.78 and line.textColor[3]==.82)
+        assert(row.bg.color[1]==row.hoverColor[1]);row.scripts.OnLeave()
+        assert(not tip:IsShown() and not U.rowTooltipOwner and row.bg.color[1]==row.normalColor[1])
+    end
+    C.destination=nil;C.results={};C.matches={goal};C.highlight=1;C:Refresh();checkRow()
+    C.matches=nil;C.destination=goal;C.results={route};C.selected=1;C:Refresh();checkRow()
+    assert(not U.rows[1].go.enabled and U.rows[1].locked:IsShown(),'unavailable routes retain their visible eligibility status')
+    local tip=U.rowTooltip;local allocated,registered=#frames,#U.texts
+    for i=1,20 do
+        C.matches=i%2==0 and {goal} or nil;C:Refresh();checkRow()
+    end
+    assert(U.rowTooltip==tip and #frames==allocated and #U.texts==registered,'hover and pooled-row reuse allocate no extra tooltip or font registrations')
+    for _,name in ipairs({'SetOwner','SetText','Show','Hide','SetFontObject'}) do GameTooltip[name]=originals[name] end
+    C.profile=saved;C.destination=nil;C:Stop();C:ApplyProfile()
+end)
+
+test('row tooltip ownership survives stale leave and clears when its row view or font changes',function()
+    C:Stop();C:ShowPanel(true);local saved=N.Model.Copy(C.profile)
+    local p=A.Position();p.name='Tooltip lifecycle target';p.id='tip-lifecycle';C.matches={p,p};C.highlight=1;C:Refresh()
+    local first,second=U.rows[1],U.rows[2]
+    first.scripts.OnEnter();second.scripts.OnEnter();local tip=U.rowTooltip
+    first.scripts.OnLeave();assert(tip:IsShown() and U.rowTooltipOwner==second,'stale leave cannot hide the new owner')
+    first:Hide();assert(tip:IsShown() and U.rowTooltipOwner==second,'stale row hide cannot hide the new owner')
+    second:Hide();assert(not tip:IsShown() and not U.rowTooltipOwner)
+    first:Show();second:Show();first.scripts.OnEnter();first.scripts.OnMouseDown(first,'LeftButton');assert(not tip:IsShown())
+    first.scripts.OnEnter();U.bodyScroll:SetVerticalScroll(10);assert(not tip:IsShown(),'scrolling clears the former row anchor')
+    first.scripts.OnEnter();U.bodyScroll:Hide();assert(not tip:IsShown(),'compact view hides the results viewport')
+    U.bodyScroll:Show();first.scripts.OnEnter();C:ShowPanel(false);assert(not tip:IsShown() and not U.frame:IsShown())
+    C:ShowPanel(true);first.scripts.OnEnter();C.matches={};C:Refresh();assert(not tip:IsShown(),'replacing the match pool removes stale tooltip anchors')
+    C.matches={p,p};C:Refresh();first.scripts.OnEnter()
+    C.profile.font='Arial';C.profile.fontSize=18;C.profile.scale=1.6;C.profile.colors.text={1,.2,.1};C:RefreshAppearance(true)
+    assert(not tip:IsShown() and not U.rowTooltipOwner,'appearance refresh hides the old measured tooltip')
+    assert(tip.TextLeft1.textColor[1]==.76 and tip.TextLeft1.textColor[2]==.78,'panel appearance cannot recolor the owned tooltip')
+    first.scripts.OnEnter();assert(tip.measuredText.path=='Fonts\\ARIALN.TTF' and tip.measuredText.size==11 and tip:GetScale()==1)
+    first.scripts.OnLeave();C.profile=saved;C.destination=nil;C:Stop();C:ApplyProfile()
 end)
 print('PASS runtime scenarios: '..count..'; frames allocated='..#frames)

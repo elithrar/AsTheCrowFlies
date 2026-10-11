@@ -124,10 +124,11 @@ function U:Surface(f,color)
     return surface
 end
 function U:ApplyAppearance()
+    self:HideRowTip()
     local colors=self.owner.profile.colors
     if not colors then return end
     for _,surface in ipairs(self.backgrounds or {}) do surface:SetVertexColor(colors.background[1],colors.background[2],colors.background[3],.97) end
-    for _,entry in ipairs(self.texts) do if not entry[1].atcfOptions then entry[1]:SetTextColor(unpack(colors.text)) end end
+    for _,entry in ipairs(self.texts) do if not entry[1].atcfOptions and not entry[1].atcfTooltip then entry[1]:SetTextColor(unpack(colors.text)) end end
     for _,row in ipairs(self.rows or {}) do row.name:SetTextColor(1,.82,0);row.lockedText:SetTextColor(.95,.25,.25) end
     if self.destinationName then self.destinationName:SetTextColor(1,.82,0) end
     if self.next then self.next:SetTextColor(1,.82,0) end
@@ -151,6 +152,29 @@ end
 function U:Tip(frame,text)
     frame:SetScript("OnEnter",function() if frame.bg then frame.bg:SetVertexColor(unpack(frame.hoverColor)) end;GameTooltip:SetOwner(frame,"ANCHOR_RIGHT");GameTooltip:SetText(text,nil,nil,nil,nil,true);GameTooltip:Show() end)
     frame:SetScript("OnLeave",function() if frame.bg then frame.bg:SetVertexColor(unpack(frame.normalColor)) end;GameTooltip:Hide() end)
+end
+function U:HideRowTip(frame)
+    if self.rowTooltip and (not frame or self.rowTooltipOwner==frame) then
+        self.rowTooltip:Hide();self.rowTooltipOwner=nil
+    end
+end
+function U:ShowRowTip(frame)
+    if not self.rowTooltip then
+        local tip=CreateFrame("GameTooltip","AsTheCrowFliesRowTooltip",UIParent,"SharedTooltipTemplate")
+        self.rowTooltip=tip;tip:SetScale(1)
+        tip.TextLeft1.atcfFixedFont=true;tip.TextLeft1.atcfTooltip=true
+    end
+    local tip=self.rowTooltip;self.rowTooltipOwner=frame
+    tip:SetOwner(frame,"ANCHOR_RIGHT")
+    -- Set the owned line's font before native SetText measures its content.
+    self:Font(tip.TextLeft1,11)
+    tip:SetText("Travel time may vary based on terrain.",.76,.78,.82,1,true);tip:Show()
+end
+function U:RowTip(frame)
+    frame:SetScript("OnEnter",function() frame.bg:SetVertexColor(unpack(frame.hoverColor));self:ShowRowTip(frame) end)
+    frame:SetScript("OnLeave",function() frame.bg:SetVertexColor(unpack(frame.normalColor));self:HideRowTip(frame) end)
+    frame:HookScript("OnHide",function() self:HideRowTip(frame) end)
+    frame:HookScript("OnMouseDown",function() self:HideRowTip(frame) end)
 end
 function U:ButtonColor(b,normal,hover) b.normalColor=normal;b.hoverColor=hover;b.bg:SetVertexColor(unpack(normal)) end
 -- Use the client's control artwork, independent of the selected font. Atlas
@@ -447,7 +471,8 @@ function U:Create(c)
     self.body=CreateFrame("Frame",nil,self.bodyScroll);self.body:SetPoint("TOPLEFT");self.body:SetWidth(c.profile.width-28);self.bodyScroll:SetScrollChild(self.body)
     self.scrollRail=f:CreateTexture(nil,"ARTWORK");self.scrollRail:SetPoint("TOPLEFT",self.bodyScroll,"TOPRIGHT",4,0);self.scrollRail:SetWidth(2);self.scrollRail:SetColorTexture(.2,.21,.24,1);self.scrollRail:Hide()
     self.scrollThumb=f:CreateTexture(nil,"OVERLAY");self.scrollThumb:SetWidth(2);self.scrollThumb:SetColorTexture(.7,.7,.72,1);self.scrollThumb:Hide()
-    self.bodyScroll:SetScript("OnVerticalScroll",function(_,offset) self:ScrollIndicator(offset) end)
+    self.bodyScroll:SetScript("OnVerticalScroll",function(_,offset) self:HideRowTip();self:ScrollIndicator(offset) end)
+    self.bodyScroll:SetScript("OnHide",function() self:HideRowTip() end)
     self.routeHeading=CreateFrame("Frame",nil,f)
     self.destinationName=self:Text(self.routeHeading,"",13,0,0,c.profile.width-28,20)
     self.destinationName.atcfEmphasis=true;self.destinationName.atcfSoftShadow=true;self:Font(self.destinationName,13)
@@ -480,7 +505,7 @@ function U:Create(c)
         local shade=b.locked:CreateTexture(nil,"BACKGROUND");shade:SetAllPoints();shade:SetColorTexture(0,0,0,.68)
         b.lockedText=self:Text(b.locked,"Undiscovered flight points",11,6,0,c.profile.width-40,22);b.lockedText:ClearAllPoints();b.lockedText:SetPoint("CENTER");b.lockedText:SetTextColor(.95,.25,.25)
         b.locked:Hide()
-        self.rows[i]=b
+        self:RowTip(b);self.rows[i]=b
     end
     local function scroll(_,delta)
         local old=self.bodyScroll:GetVerticalScroll();local range=self.bodyScrollRange or 0
@@ -547,6 +572,7 @@ function U:Create(c)
         self.resizeLayout=true;self:Refresh(c);self.resizeLayout=false
     end)
     f:SetScript("OnHide",function()
+        self:HideRowTip()
         self:FinishResize(c,false);self:FinishMove(c,false)
     end)
     self.from:SetText("Current location");self:Layout(c)
@@ -688,21 +714,6 @@ function U:Refresh(c)
                 b:SetHeight(rowHeight);b:ClearAllPoints();b:SetPoint("TOPLEFT",0,-bodyHeight);b.bodyOffset=bodyHeight
                 b.go:ClearAllPoints();b.go:SetPoint("TOPRIGHT",b,"TOPRIGHT",-8,-6);bodyHeight=bodyHeight+rowHeight+5
                 b.normalColor=(c.matches and i==c.highlight or not c.matches and i==c.selected) and {.22,.27,.18,1} or {.10,.11,.14,1};b.bg:SetVertexColor(unpack(b.normalColor))
-                local tip
-                if c.matches then
-                    tip=item.name.."\n"..(item.source or "Flight point").."\nDistance from "..(not c.searchOrigin and c.origin and c.origin.name or "current location")..". Ground ETA includes 35% for detours; bearings only."
-                    if item.confidence=="provider" then tip=tip.."\nAvailability may depend on phase or quest progress." end
-                    if item.faction then tip=tip.."\nFaction: "..item.faction end
-                    if item.mobile then tip=tip.."\nThis NPC moves; the marker is a recorded location." end
-                    if item.phase and item.phase~=0 then tip=tip.."\nPhase requirement: "..tostring(item.phase).." (not checked)" end
-                    if (item.questStarts or 0)>0 then tip=tip.."\nQuest giver; available quests depend on your progress." end
-                    if (item.questEnds or 0)>0 then tip=tip.."\nQuest turn-in NPC; requires the relevant quest." end
-                else
-                    tip=item.destination.name.."\n"..M.RouteLegs(item,c.ctx.speed).."\nWalk "..M.Yards(item.walk).." + fly "..M.Yards(item.flight)
-                    for _,leg in ipairs(item.legs) do if leg.mode=="flight" then tip=tip.."\n"..(leg.start.name or tostring(leg.from)).." > "..(leg.finish.name or tostring(leg.to)) end end
-                    tip=tip.."\n~ Ground time includes 35% for detours; bearings only."..(item.unavailable=="undiscovered" and "\nDiscover the required flight points first." or item.conditional and "\nConfirm this flight at the departure master." or "")
-                end
-                self:Tip(b,tip)
             end
         end
         bodyHeight=math.max(0,bodyHeight-5)

@@ -1,8 +1,12 @@
 # Validation and acceptance status
 
-Version **0.1.1** follows the published v0.1.0 release with panel sizing, docking and frame-layer improvements. The user authorized reviewing and merging this patch, publishing a new stable version and replacing the local Forever addon. The release workflow publishes only an explicitly pushed annotated version tag reachable from main; merging alone does not publish. The exact committed package and installed-file receipt are recorded in the task outputs and pull request after installation. SavedVariables, unrelated addons and existing backups remain outside the replacement scope; the user requested no new development backup.
+Version **0.1.2** follows v0.1.1 with concise search and route tooltips. The user authorized reviewing and merging patch updates, publishing new stable versions and replacing the local Forever addon. The release workflow publishes only an explicitly pushed annotated version tag reachable from main; merging alone does not publish. The exact committed package and installed-file receipt are recorded in the task outputs and pull request after installation. SavedVariables, unrelated addons and existing backups remain outside the replacement scope; the user requested no new development backup.
 
 The supplied in-game screenshots were inspected and used to identify UI defects. A read-only native capture showed the previously installed idle panel; it does not verify this candidate's route cards. No in-game rendering test or live routing journey is claimed for this candidate. Installation and file verification establish payload integrity, not native visual or gameplay correctness.
+
+## v0.1.2 concise tooltips
+
+The current patch passes **131 Lua 5.1 scenarios (46 model, 85 mocked runtime)**, 19 release guard tests and five source-package tests with the private override test skipped. The added tooltip regressions verify the exact user-approved sentence for matches and route cards, font sizing before native text measurement, muted styling independent of panel scale, pooled allocations, global-tooltip isolation, owner-scoped cleanup and dismissal during scrolling, hiding and font changes. Source review uses the pinned shared native tooltip template. No WoW interaction or native rendering verification was performed.
 
 ## v0.1.1 panel sizing and docking
 
