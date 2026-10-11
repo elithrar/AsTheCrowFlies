@@ -18,7 +18,7 @@ function V.Update(s,p,now,onTaxi,dead,offer)
     if dead or not M.Position(p) then
         if onTaxi then
             local leg=s.route.legs[s.leg]
-            if not leg or leg.mode~="flight" or not offer or offer.from~=leg.from or offer.to~=leg.to then
+            if not leg or leg.mode~="flight" or (not s.flightSeen and (not offer or offer.from~=leg.from or offer.to~=leg.to)) then
                 s.state="unavailable";s.message="Unconfirmed flight; recalculate after landing";s.measure=nil;return
             end
             s.flightSeen=true
@@ -30,7 +30,7 @@ function V.Update(s,p,now,onTaxi,dead,offer)
     local e=s.route.legs[s.leg];if not e then s.state="arrived";return end
     if e.mode=="flight" then
         if s.state~="flying" and onTaxi then
-            if not offer or offer.from~=e.from or offer.to~=e.to then s.state="unavailable";s.message="Unconfirmed flight; recalculate after landing";s.measure=nil;return end
+            if not s.flightSeen and (not offer or offer.from~=e.from or offer.to~=e.to) then s.state="unavailable";s.message="Unconfirmed flight; recalculate after landing";s.measure=nil;return end
             s.state="flying"
             if not s.flightSeen then s.measure={at=now,key=e.timingKey or tostring(e.id),generation=s.generation} end
             s.flightSeen=true;s.message="In flight"

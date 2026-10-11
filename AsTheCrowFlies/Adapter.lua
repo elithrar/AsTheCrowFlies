@@ -25,10 +25,10 @@ function A.Position()
     if not x or (x==0 and y==0) then return nil end
     return A.FromMap(id,x,y)
 end
-function A.Project(p,id)
+function A.Project(p,id,allowOutside)
     if not M.Position(p) or not A.Number(id) or not C_Map or not CreateVector2D then return nil end
     local map,v=A.Call(C_Map.GetMapPosFromWorldPos,p.map,CreateVector2D(p.x,p.y),id)
-    local x,y=A.XY(v);if map==id and x and x>=0 and x<=1 and y>=0 and y<=1 then return x,y end
+    local x,y=A.XY(v);if map==id and x and (allowOutside or (x>=0 and x<=1 and y>=0 and y<=1)) then return x,y end
 end
 function A.Context(previous)
     local _,class=A.Call(UnitClass,"player");local faction=A.Call(UnitFactionGroup,"player")
@@ -78,9 +78,10 @@ function A.Taxi(id,character,data)
             end
             if valid and previous==v.nodeID then
                 local ids={};local distance=0;for _,e in ipairs(legs) do ids[#ids+1]=e.id;distance=distance+e.distance end
-                local key=table.concat(ids,",")
+                local key=table.concat(ids,",");local geometry={}
+                for _,edge in ipairs(legs) do if edge.points then geometry[#geometry+1]={map=data.nodes[edge.from].map,points=edge.points} end end
                 local cost=A.Call(TaxiNodeCost,v.slotIndex);if not A.Number(cost) then cost=nil end
-                offers[v.nodeID]={from=current.nodeID,to=v.nodeID,legs=legs,key=key,distance=distance,cost=cost,slot=v.slotIndex}
+                offers[v.nodeID]={from=current.nodeID,to=v.nodeID,legs=legs,geometry=geometry,key=key,distance=distance,cost=cost,slot=v.slotIndex}
             end
         end
     end end

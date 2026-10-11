@@ -176,7 +176,7 @@ function U:Refresh(c)
             end
         end
         local y=200+count*83;self.body:SetHeight(math.max(1,count*83));self.note:ClearAllPoints();self.note:SetPoint("TOPLEFT",14,-y)
-        self.note:SetText(c.status or (#c.results>0 and ("Compass options • ground paths unverified\n*Soft ETA; flight prior uncalibrated"..(c.categoryCapped and "; 12 nearest candidates" or "")) or c.providerStatus or "Search for a destination. /atcf remember saves a place."))
+        self.note:SetText(c.status or (#c.results>0 and ((c.profile.routeOrder=="time" and "Estimated time" or "Distance").." • ground paths unverified\n*Soft ETA"..(c.categoryCapped and ("; "..c.categoryCompared.." sampled candidates") or "; flight prior uncalibrated")) or c.providerStatus or "Search for a destination. /atcf remember saves a place."))
         self.go:ClearAllPoints();self.go:SetPoint("TOPLEFT",14,-y-49);self.stop:ClearAllPoints();self.stop:SetPoint("TOPLEFT",c.profile.width-66,-y-49)
         self.go.text:SetText(#c.results>0 and (c.origin and "Use current location" or "Go") or "Find routes");self.frame:SetHeight(y+91)
     end

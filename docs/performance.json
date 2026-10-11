@@ -1,7 +1,7 @@
 {
   "lua": "5.1",
   "iterations": 30,
-  "median_ms": 0.92,
-  "max_ms": 1.941,
-  "scope": "One destination; local 98-node / 302-edge graph; offline MONOLITH CPU"
+  "median_ms": 1.376,
+  "max_ms": 3.788,
+  "scope": "One destination; local 98-node / 294-edge graph; offline MONOLITH CPU"
 }

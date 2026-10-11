@@ -69,11 +69,15 @@
     }
   },
   "candidateNodes": 98,
-  "candidateEdges": 302,
+  "candidateEdges": 294,
   "excluded": [
     {
       "id": 241,
       "reason": "spline continent transition"
+    },
+    {
+      "id": 253,
+      "reason": "spline endpoint mismatch"
     },
     {
       "id": 285,
@@ -124,8 +128,24 @@
       "reason": "unresolved spline event/flag/delay"
     },
     {
+      "id": 439,
+      "reason": "spline endpoint mismatch"
+    },
+    {
       "id": 472,
       "reason": "unsupported/missing endpoint"
+    },
+    {
+      "id": 9571,
+      "reason": "scripted/self-loop path"
+    },
+    {
+      "id": 9574,
+      "reason": "scripted/self-loop path"
+    },
+    {
+      "id": 9620,
+      "reason": "scripted/self-loop path"
     },
     {
       "id": 9669,
@@ -164,6 +184,18 @@
       "reason": "unsupported/missing endpoint"
     },
     {
+      "id": 11512,
+      "reason": "scripted/self-loop path"
+    },
+    {
+      "id": 11515,
+      "reason": "scripted/self-loop path"
+    },
+    {
+      "id": 11517,
+      "reason": "scripted/self-loop path"
+    },
+    {
       "id": 11520,
       "reason": "unsupported/missing endpoint"
     },
@@ -176,7 +208,7 @@
       "reason": "unsupported/missing endpoint"
     }
   ],
-  "payloadSHA256": "b9ad792671e87fa9a15f3fd5a20daacde1999fe577769cdc885cc3b649d058a6",
+  "payloadSHA256": "e74250e6ed1ea8cf69e3869e161135bb1bbba195ba794f5e0ccd78fc30320db7",
   "hotfixes": "Not applied: candidate-only graph; runtime offered-itinerary validation required",
   "rights": "Local development payload only; no redistribution license inferred",
   "groundCorridors": 0

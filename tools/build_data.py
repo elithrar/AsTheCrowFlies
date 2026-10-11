@@ -29,6 +29,7 @@ def build(tables):
         reason=None
         if not a or not b:reason='unsupported/missing endpoint'
         elif a['map']!=b['map']:reason='cross-continent transition'
+        elif a['id']==b['id']:reason='scripted/self-loop path'
         elif a['condition'] or b['condition'] or a['visibility'] or b['visibility']:reason='unresolved condition'
         elif len(points)<2 or [p['NodeIndex'] for p in points]!=list(range(len(points))):reason='incomplete spline'
         elif any(p['ContinentID']!=a['map'] for p in points):reason='spline continent transition'
@@ -36,8 +37,13 @@ def build(tables):
         if reason:excluded.append(dict(id=e['ID'],reason=reason));continue
         xyz=[p['Loc'] for p in points]
         assert all(math.isfinite(c) for p in xyz for c in p)
-        distance=sum(math.dist(p,q) for p,q in zip(xyz,xyz[1:]))
-        edges.append(dict(id=e['ID'],**{'from':a['id'],'to':b['id']},distance=distance,cost=e['Cost'],mode='flight',quality='candidate',points=[[p[0],p[1]] for p in xyz]))
+        gaps=[math.dist([a[k] for k in ('x','y','z')],xyz[0]),math.dist(xyz[-1],[b[k] for k in ('x','y','z')])]
+        # An endpoint more than 150 yards away cannot establish passenger connectivity.
+        if max(gaps)>150:
+            excluded.append(dict(id=e['ID'],reason='spline endpoint mismatch'));continue
+        splineDistance=sum(math.dist(p,q) for p,q in zip(xyz,xyz[1:]))
+        distance=splineDistance+sum(gaps)
+        edges.append(dict(id=e['ID'],**{'from':a['id'],'to':b['id']},distance=distance,splineDistance=splineDistance,endpointGap=sum(gaps),cost=e['Cost'],mode='flight',quality='candidate',points=[[p[0],p[1]] for p in xyz]))
     maps=sorted({r['UiMapID'] for r in tables.get('UiMapAssignment',{}).get('rows',[]) if r['MapID'] in (0,1)})
     return dict(build='1.60.1.70338',nodes=ns,edges=edges,taxiMaps=maps),excluded
 def main():

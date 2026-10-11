@@ -4,7 +4,7 @@ local M,S,R,V=N.Model,N.Settings,N.Routes,N.Navigation
 local count=0
 local function test(name,fn) local ok,err=pcall(fn);assert(ok,name..': '..tostring(err));count=count+1 end
 local function pos(x,y,id) return {x=x,y=y or 0,map=0,uiMapID=1,id=id,name=tostring(id),confidence='observed'} end
-local ctx={known={},faction='Alliance',speed=7,flightPrior=32}
+local ctx={known={[1]={state='known'},[2]={state='known'},[3]={state='known'},[4]={state='known'}},faction='Alliance',speed=7,flightPrior=32}
 test('coordinate identity and cross-map rejection',function()
     assert(M.Distance(pos(0),pos(3,4))==5);local p=pos(0);p.map=1;assert(not M.Distance(p,pos(0)))
     p=pos(0);p.uiMapID=2;assert(not M.SameFloor(p,pos(0)))
@@ -16,6 +16,11 @@ test('cardinal bearings and rotation',function()
     e,n=M.Vector(pos(0),pos(100),math.pi/2);assert(math.abs(e-100)<1e-6 and math.abs(n)<1e-6)
     local x,y,clip=M.Minimap(100,100,50,200,200,'ROUND');assert(clip and math.abs(x^2+y^2-90^2)<1e-6)
     x,y=M.Minimap(100,100,50,200,200,'SQUARE');assert(x==90 and y==90)
+end)
+test('flight polyline clips crossing segments without inventing ground paths',function()
+    local x1,y1,x2,y2=M.ClipSegment(-1,.5,2,.5);assert(x1==0 and y1==.5 and x2==1 and y2==.5)
+    assert(not M.ClipSegment(-1,-1,-.5,-.5));assert(not M.ClipSegment(0/0,0,1,1))
+    x1,y1,x2,y2=M.ClipSegment(.5,-1,.5,2);assert(x1==.5 and y1==0 and x2==.5 and y2==1)
 end)
 test('search duplicates accents class and factions',function()
     local items={{id='b',name='Élan',category='class',class='MAGE',faction='Alliance'},{id='a',name='Élan',category='class',class='MAGE',faction='Alliance'},{id='c',name='Elan',category='class',class='MAGE',faction='Horde'}}
@@ -47,6 +52,7 @@ test('directed graph disconnected and cycles',function()
 end)
 test('unknown flight conditional only; undiscovered blocked',function()
     assert(not R.Shortest(nodes,edges,3,4,ctx,nil,false))
+    assert(not R.Shortest(nodes,edges,3,4,{known={},faction='Alliance'},nil,true))
     local c={known={[4]={state='undiscovered'}},faction='Alliance'};assert(not R.Shortest(nodes,edges,3,4,c,nil,true))
     local e=edge(3,3,4,50);e.faction='Horde';assert(not R.Shortest(nodes,{e},3,4,ctx,nil,true))
 end)
@@ -56,6 +62,54 @@ test('farther departure wins and flight alternatives survive walking shortcut',f
     assert(plans[2].legs[2].from==3 and plans[2].distance==1190 and plans[2].conditional)
     assert(plans[2].eta<plans[1].eta and plans[1].distance<plans[2].distance)
 end)
+test('whole offered itinerary and static hops share one alternative identity',function()
+    local a,b=edge(101,1,3,40),edge(102,3,4,1000)
+    local whole=edge('offered:101,102',1,4,1040);whole.timingKey='101,102';whole.offered=true
+    assert(R.Summary({a,b},pos(1100,0,'goal'),ctx).signature==R.Summary({whole},pos(1100,0,'goal'),ctx).signature)
+end)
+
+test('confirmed offer wins equal-cost static duplicate',function()
+    local a=edge(123,1,4,1000);local whole=edge('offered:123',1,4,1000);whole.timingKey='123';whole.offered=true
+    local plans=R.Plan(pos(0),{pos(1100,0,'goal')},{nodes=nodes,edges={a,whole}},ctx)
+    local flights=0;for _,r in ipairs(plans) do if r.flight>0 then flights=flights+1;assert(not r.conditional) end end
+    assert(flights==1)
+end)
+
+test('open master suppresses contradicted itineraries until context closes',function()
+    local a,b,c=edge(123,1,4,1000),edge(124,1,3,50),edge(125,3,4,1000)
+    local offered=edge('offered:124',1,3,50);offered.timingKey='124';offered.offered=true
+    local context=M.Copy(ctx);context.taxiFrom=1
+    assert(not R.Shortest(nodes,{a},1,4,context,nil,true,true))
+    assert(not R.Shortest(nodes,{a,b,c,offered},1,4,context,nil,true,true))
+    local path=R.Shortest(nodes,{a,b,c,offered},1,3,context,nil,true,true);assert(path[1].offered)
+    context.taxiFrom=nil;assert(R.Shortest(nodes,{a},1,4,context,nil,true,true))
+end)
+
+test('estimated time searches longer faster route including both walking legs',function()
+    local a,b=edge(11,1,2,1100),edge(12,3,4,1600)
+    local c=M.Copy(ctx);c.timings={['11']={100},['12']={30}};c.routeOrder='time'
+    local plans=R.Plan(pos(0),{pos(1100,0,'goal')},{nodes=nodes,edges={a,b}},c)
+    assert(plans[1].legs[2].id==12 and plans[1].distance==1790)
+    assert(math.abs(plans[1].eta-(30+190/7))<1e-6)
+    c.routeOrder='distance';local shortest=R.Plan(pos(0),{pos(1100,0,'goal')},{nodes=nodes,edges={a,b}},c)
+    assert(shortest[1].flight==0 and shortest[2].legs[2].id==11)
+    c.timings={};c.routeOrder='time';local uncalibrated=R.Plan(pos(0),{pos(1100,0,'goal')},{nodes=nodes,edges={a,b}},c)
+    assert(uncalibrated[1].prior and uncalibrated[1].eta<uncalibrated[#uncalibrated].eta)
+    assert(S.Load({routeOrder='time'}).routeOrder=='time' and S.Load({routeOrder='invalid'}).routeOrder=='distance')
+end)
+
+test('time shortlist includes farther NPC reached quickly through discovered flight',function()
+    local ns={[1]=pos(0,0,1),[2]=pos(2000,0,2)}
+    local data={nodes=ns,edges={{id=71,from=1,to=2,start=ns[1],finish=ns[2],mode='flight',distance=2100}}}
+    local candidates={};for i=1,13 do candidates[i]=pos(500+i*10,0,'near'..i) end;candidates[14]=pos(2000,0,'far-trainer')
+    local c=M.Copy(ctx);c.routeOrder='time';c.timings={['71']={30}}
+    local selected=R.Candidates(pos(0),candidates,data,c,12);local found=false
+    for _,p in ipairs(selected) do if p.id=='far-trainer' then found=true end end;assert(found and #selected<=24)
+    local plans=R.Plan(pos(0),selected,data,c);assert(plans[1].destination.id=='far-trainer' and plans[1].flight>0 and plans[1].eta==30)
+    c.known={};selected=R.Candidates(pos(0),candidates,data,c,12)
+    for _,p in ipairs(selected) do assert(p.id~='far-trainer') end
+end)
+
 test('quality and ETA remain separate; immutable input',function()
     local e=edge(8,3,4,1000);local r=R.Summary({e},pos(1100),{timings={['8']={50}},speed=7,flightPrior=20})
     assert(r.eta==50 and r.legs[1].seconds==50 and e.seconds==nil)

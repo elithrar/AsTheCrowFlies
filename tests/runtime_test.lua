@@ -42,6 +42,11 @@ local function object(name)
     local f=setmetatable({scripts={},events={},name=name},{__index=methods});frames[#frames+1]=f;if name then _G[name]=f end;return f
 end
 function methods:CreateTexture() return object() end
+function methods:CreateLine() return object() end
+function methods:SetStartPoint(...) self.startPoint={...} end
+function methods:SetEndPoint(...) self.endPoint={...} end
+function methods:SetThickness(v) self.thickness=v end
+function methods:SetColorTexture(...) self.color={...} end
 function methods:CreateFontString() return object() end
 function CreateFrame(kind,name,parent,template)
     local f=object(name);f.parent=parent;f.kind=kind
@@ -116,6 +121,16 @@ test('category button compares category rather than first autocomplete',function
     C.destination=nil;C.query='';C.filter={category='place'};C.matches={C.destinations[1]};C.results={};U.go.scripts.OnClick();assert(#C.results==1 and not C.destination and not C.matches)
     C.query='missing';C.results={};U.go.scripts.OnClick();assert(#C.results==0 and not C.destination)
 end)
+test('nearest class trainer defaults to player class and filters faction',function()
+    local saved=C.destinations;local p=A.Position();C:Edit();C.destination=nil;C.query='';C.filter={category='class'}
+    C.destinations={}
+    for i,entry in ipairs({{id='far',offset=200,class='MAGE',faction='Alliance'},{id='wrong-class',offset=1,class='WARRIOR',faction='Alliance'},{id='wrong-faction',offset=2,class='MAGE',faction='Horde'},{id='near',offset=100,class='MAGE',faction='Alliance'}}) do
+        entry.x=p.x+entry.offset;entry.y=p.y;entry.map=p.map;entry.category='class';entry.name=entry.id;C.destinations[i]=entry
+    end
+    C:Plan();assert(#C.results==2 and C.results[1].destination.id=='near' and C.results[2].destination.id=='far')
+    C.destinations=saved;C.filter={category='all'}
+end)
+
 test('minimap retains both coordinates and map pan never changes player state',function()
     C:Choose(C.destinations[1]);C.destination=N.Model.Copy(C.destination);C.destination.x=1100;C.destination.y=2100;C:Plan();C:Go();C:Tick()
     local point=N.Overlay.mini.point;assert(point and type(point[4])=='number' and type(point[5])=='number' and point[5]~=0)
@@ -169,6 +184,8 @@ test('open taxi before Go reconciles whole itinerary with unknown fly-through',f
     C:Choose(C.data.nodes[3]);C:Plan();local flightIndex
     for i,r in ipairs(C.results) do if r.flight>0 and not r.conditional then flightIndex=i end end
     assert(flightIndex);C.selected=flightIndex;C:Go();assert(C.nav.state=='awaiting_flight' and C.nav.route.legs[C.nav.leg].to==3)
+    C.events.scripts.OnEvent(nil,'TAXIMAP_CLOSED');assert(C.results[flightIndex].conditional and C.nav.route.conditional)
+    C:TaxiOpened()
     assert(N.Navigation.Target(C.nav).id==1);hooks.TakeTaxiNode(3);onTaxi=true;now=1;C:Tick();assert(C.nav.state=='flying')
     playerY=playerY+.1;onTaxi=false;now=21;C:Tick();assert(C.character.timings['101,102'][1]==20)
     C:Stop();C.data.nodes[999]={id=999,map=0,x=0,y=0,name='Debug test'};C:Reindex()
@@ -178,5 +195,26 @@ test('two Enter presses accept then plan without losing focus',function()
     C:Edit();C.filter={category='all'};C.matches={C.destinations[1]};C.highlight=1;C.searchOrigin=false;U.to:SetFocus()
     U.to.scripts.OnEnterPressed();assert(U.to:HasFocus() and C.destination)
     U.to.scripts.OnEnterPressed();assert(not U.to:HasFocus() and #C.results>0)
+end)
+
+test('confirmed flight survives repeated late missing-position ticks without timing',function()
+    C:Stop();local p=A.Position();p.name='Departure';local destination=N.Model.Copy(p);destination.x=p.x+100;destination.id='landing';destination.name='Landing'
+    local edge={id=901,from=1,to=3,start=p,finish=destination,mode='flight',distance=120,offered=true}
+    local route=N.Routes.Summary({edge},destination,C:Context());assert(N.Navigation.Start(C.nav,route,p,0))
+    C.chosenFlight={from=1,to=3,at=0};onTaxi=true;now=1;C:Tick();assert(C.nav.flightSeen and C.nav.measure)
+    C.destination=destination;C:Enter();assert(C.nav.route==route and C.nav.state=='flying' and C.nav.flightSeen)
+    local original=A.Position;A.Position=function() return nil end
+    now=12;C:Tick();now=13;C:Tick();assert(C.nav.state=='paused' and C.chosenFlight and not C.nav.measure)
+    A.Position=function() return p end;now=14;C:Tick();assert(C.nav.state=='flying' and not C.nav.measure)
+    A.Position=function() return destination end;onTaxi=false;now=30;C:Tick();assert(C.nav.leg==2 and not C.character.timings['901'])
+    A.Position=original;C:Stop()
+end)
+test('flight overlay uses source segments, caches geometry, hides on stop',function()
+    local route={legs={{mode='walk',start={map=0},points={{0,0},{100,100}}},{mode='flight',geometry={{map=0,points={{1000,-1000},{1000,2000},{1000,5000}}}}}}}
+    N.Overlay:FlightPaths(route,canvas,1429);assert(N.Overlay.visibleSegments==2)
+    local allocated=#frames;N.Overlay:FlightPaths(route,canvas,1429);assert(#frames==allocated)
+    local line=N.Overlay.lines[1];assert(line.startPoint[3]==0 and line.endPoint[3]==500)
+    N.Overlay:Clear();assert(not N.Overlay.paths:IsShown())
+    N.Overlay:FlightPaths(route,canvas,1430);assert(#frames==allocated)
 end)
 print('PASS runtime scenarios: '..count..'; frames allocated='..#frames)

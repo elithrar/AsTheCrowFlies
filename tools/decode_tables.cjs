@@ -5,6 +5,7 @@ const hash=b=>crypto.createHash('sha256').update(b).digest('hex');
 const cache=new Map();let current;
 const partialMap=process.argv.includes('--partial-map');
 const skyOnly=process.argv.includes('--sky');
+const transportOnly=process.argv.includes('--transport');
 function load(rel){
  if(cache.has(rel))return cache.get(rel);
  const file=path.join(src,rel),mod={exports:{}};
@@ -33,9 +34,9 @@ function load(rel){
 const BW=load('buffer.js'),DBD=load('db/DBDParser.js'),Reader=load('db/WDCReader.js');
 async function run(){
  fs.mkdirSync(path.join(stage,'tables'),{recursive:true});
- for(const [name,id] of (skyOnly?[['LightSkybox',1308501],['LightParams',1334669],['Light',1375579],['LightData',1375580]]:[['TaxiNodes',1068100],['TaxiPath',1067802],['TaxiPathNode',1000437],['UiMap',1957206],['UiMapAssignment',1957219]])){
+ for(const [name,id] of (transportOnly?[['GameObjects',841620],['TransportPhysics',1121973],['TransportAnimation',1140686],['TransportRotation',1140687],['LoadingScreenTaxiSplines',1302239]]:skyOnly?[['LightSkybox',1308501],['LightParams',1334669],['Light',1375579],['LightData',1375580]]:[['TaxiNodes',1068100],['TaxiPath',1067802],['TaxiPathNode',1000437],['UiMap',1957206],['UiMapAssignment',1957219]])){
   if(partialMap&&name!=='Map')continue;
-  current=partialMap?path.join(stage,'partial/Map.readable-prefix.bin'):path.join(stage,'raw',id+'.bin');if(!fs.existsSync(current)){console.log(name,'missing');continue;}
+  current=partialMap?path.join(stage,'partial/Map.readable-prefix.bin'):path.join(stage,transportOnly?'transport/raw':'raw',id+'.bin');if(!fs.existsSync(current)){console.log(name,'missing');continue;}
   const data=fs.readFileSync(current),dbd=fs.readFileSync(path.join(base,'tools/WoWDBDefs/definitions',name+'.dbd'));
   const reader=new Reader(name+'.db2');let schema;
   reader.loadSchema=async layout=>{

@@ -14,7 +14,7 @@ def main():
         assert hashlib.sha256(taxi).hexdigest()==provenance['payloadSHA256']
         payload['AsTheCrowFlies/Data/Taxi.lua']=taxi
         payload['AsTheCrowFlies/DATA-PROVENANCE.json']=(ROOT/'docs/data-provenance.json').read_bytes()
-    for name in ['README.md','NOTICES.md','plan.md','docs/COVERAGE.md','docs/VALIDATION.md','docs/data-provenance.json','docs/npc-coverage.json','docs/performance.json']:
+    for name in ['README.md','NOTICES.md','plan.md','docs/BEHAVIOR.md','docs/COVERAGE.md','docs/VALIDATION.md','docs/data-provenance.json','docs/npc-coverage.json','docs/transport-audit.json','docs/performance.json']:
         payload['AsTheCrowFlies/'+name]=(ROOT/name).read_bytes()
     if (ROOT/'LICENSE').exists():payload['AsTheCrowFlies/LICENSE']=(ROOT/'LICENSE').read_bytes()
     toc=payload['AsTheCrowFlies/AsTheCrowFlies.toc'].decode()

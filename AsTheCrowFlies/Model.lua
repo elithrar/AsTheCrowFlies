@@ -72,3 +72,19 @@ function M.Minimap(east,north,radius,width,height,shape)
     local clipped=factor>1; if clipped then x,y=x/factor,y/factor end
     return x,y,clipped
 end
+-- Liang-Barsky clipping in the viewed map's normalized coordinate rectangle.
+-- Out-of-view points are clipped, not clamped individually (which bends paths).
+function M.ClipSegment(x1,y1,x2,y2)
+    if not M.Number(x1) or not M.Number(y1) or not M.Number(x2) or not M.Number(y2) then return nil end
+    local dx,dy=x2-x1,y2-y1;local low,high=0,1
+    local p,q={-dx,dx,-dy,dy},{x1,1-x1,y1,1-y1}
+    for i=1,4 do
+        if p[i]==0 then if q[i]<0 then return nil end
+        else
+            local r=q[i]/p[i]
+            if p[i]<0 then low=math.max(low,r) else high=math.min(high,r) end
+            if low>high then return nil end
+        end
+    end
+    return x1+low*dx,y1+low*dy,x1+high*dx,y1+high*dy
+end

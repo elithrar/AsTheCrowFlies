@@ -2,6 +2,8 @@ local ADDON,N=...;local M,A,R,V=N.Model,N.Adapter,N.Routes,N.Navigation
 local C={nav=V.New(),destinations={},filter={category="all"},results={},selected=1,searchGeneration=0};N.Core=C
 function C:Context()
     self.ctx=A.Context(self.ctx and self.ctx.speed);self.ctx.known=self.character.known;self.ctx.timings=self.character.timings;self.ctx.flightPrior=self.profile.flightPrior;self.ctx.requireObserved=true
+    self.ctx.routeOrder=self.profile.routeOrder
+    self.ctx.taxiFrom=self.taxi and self.taxi.from or nil
     return self.ctx
 end
 function C:Reindex()
@@ -45,14 +47,11 @@ function C:Plan(useCurrent)
     if useCurrent then self.origin=nil end
     local candidates=self.destination and {self.destination} or M.Search(self.destinations,self.query or "",self.filter,self:Context())
     if not self.destination and self.filter.category=="all" then self.status="Choose a destination or category";self:Refresh();return end
-    -- Category search first compares direct lower bounds, then routes the closest 12.
-    table.sort(candidates,function(a,b)
-        local da,db=M.Distance(origin,a) or math.huge,M.Distance(origin,b) or math.huge
-        return da==db and tostring(a.id)<tostring(b.id) or da<db
-    end)
-    local capped=#candidates>12;while #candidates>12 do candidates[#candidates]=nil end
+    local capped;candidates,capped=R.Candidates(origin,candidates,self.data,self:Context(),12)
     self.results,self.status=R.Plan(origin,candidates,self.data,self:Context());self.selected=1
-    self.categoryCapped=capped;self.nav.state="results";self:Refresh()
+    self.categoryCapped=capped;self.categoryCompared=#candidates
+    if not self.nav.route then self.nav.state="results" end
+    self:Refresh()
 end
 function C:Go()
     if self.origin then self:Plan(true);self.status="Recalculated from current location. Review, then Go.";self:Refresh();return end
@@ -80,7 +79,7 @@ function C:TaxiOpened()
     for to,offer in pairs(observation.offers) do
         if self.data.nodes[to] then
             self.character.known[to]={state="known",faction=self.data.nodes[to].faction or self.ctx.faction}
-            edges[#edges+1]={id="offered:"..offer.key,from=offer.from,to=offer.to,start=node,finish=self.data.nodes[to],mode="flight",distance=offer.distance,offered=true,live=true,timingKey=offer.key}
+            edges[#edges+1]={id="offered:"..offer.key,from=offer.from,to=offer.to,start=node,finish=self.data.nodes[to],mode="flight",distance=offer.distance,geometry=offer.geometry,offered=true,live=true,timingKey=offer.key}
         end
     end
     self.character.known[observation.from]={state="known",faction=node.faction or self.ctx.faction};self.data.edges=edges;self:Reindex()
@@ -92,8 +91,9 @@ function C:TaxiOpened()
         if first and last and first.mode=="flight" and first.from==observation.from then
             local offer=observation.offers[last.to]
             if offer then
-                local edge={id="offered:"..offer.key,from=offer.from,to=offer.to,start=self.data.nodes[offer.from],finish=self.data.nodes[offer.to],mode="flight",distance=offer.distance,offered=true,timingKey=offer.key,seconds=N.Settings.Timing(self.character.timings,offer.key) or offer.distance/self.profile.flightPrior}
+                local edge={id="offered:"..offer.key,from=offer.from,to=offer.to,start=self.data.nodes[offer.from],finish=self.data.nodes[offer.to],mode="flight",distance=offer.distance,geometry=offer.geometry,offered=true,timingKey=offer.key,seconds=N.Settings.Timing(self.character.timings,offer.key) or offer.distance/self.profile.flightPrior}
                 for _=start,finish do table.remove(route.legs,start) end;table.insert(route.legs,start,edge)
+                N.Overlay.pathKey=nil
                 self.expected=offer;self.nav.leg=start;self.nav.state="awaiting_flight"
             else self.expected=nil;self.nav.state="unavailable";self.nav.message="This flight is not offered here; recalculate" end
         end
@@ -109,7 +109,7 @@ function C:Tick()
     if not self.ready then return end
     local ctx=self:Context();local p=A.Position();local now=GetTime()
     local chosen=self.chosenFlight
-    if chosen and self.nav.state~="flying" and now-chosen.at>10 then self.chosenFlight=nil;chosen=nil end
+    if chosen and not self.nav.flightSeen and self.nav.state~="flying" and now-chosen.at>10 then self.chosenFlight=nil;chosen=nil end
     local sample
     if self.manualPause then self.nav.measure=nil end
     if not self.manualPause or ctx.onTaxi or self.nav.flightSeen then sample=V.Update(self.nav,p,now,ctx.onTaxi,ctx.dead,chosen) end
@@ -162,6 +162,10 @@ frame:SetScript("OnEvent",function(_,event,arg)
         if event=="TAXIMAP_OPENED" then C:TaxiOpened()
         elseif event=="TAXIMAP_CLOSED" then
             C.taxi=nil;for _,edge in ipairs(C.data.edges) do if edge.live then edge.offered=false end end
+            local function invalidate(route)
+                if route then for _,edge in ipairs(route.legs) do if edge.mode=="flight" then edge.offered=false;route.conditional=true end end end
+            end
+            for _,route in ipairs(C.results) do invalidate(route) end;invalidate(C.nav.route);C:Refresh()
         elseif event=="PLAYER_ENTERING_WORLD" then
             C.nav.measure=nil;C.nav.previous=nil
             local p=A.Position();if p then A.ObserveMap(p.uiMapID,C.character,C.data.nodes) end

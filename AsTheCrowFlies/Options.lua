@@ -1,6 +1,6 @@
 local _,N=...;local O={};N.Options=O
 function O:Create(c)
-    local U=N.UI;local f=CreateFrame("Frame","AsTheCrowFliesOptions",UIParent);self.frame=f;f:SetSize(344,352);f:SetPoint("CENTER");f:SetFrameStrata("DIALOG");f:EnableMouse(true);f:SetClampedToScreen(true);U:Surface(f)
+    local U=N.UI;local f=CreateFrame("Frame","AsTheCrowFliesOptions",UIParent);self.frame=f;f:SetSize(344,394);f:SetPoint("CENTER");f:SetFrameStrata("DIALOG");f:EnableMouse(true);f:SetClampedToScreen(true);U:Surface(f)
     U:Text(f,"Navigation settings",16,18,-14,270,28)
     U:Button(f,"x",306,-14,24,24,function() f:Hide() end)
     U:Text(f,"Font",12,18,-55,90,28)
@@ -24,6 +24,10 @@ function O:Create(c)
     check("Lock panel position","locked",-138);check("Minimap and world-map markers","overlays",-172)
     U:Button(f,"Reset placement",18,-218,145,28,function() c.profile.x=24;c.profile.y=-180;c.profile.dock="none";c.profile.scale=1;self.scaleText:SetText("100%");c.tucked=false;c:Refresh() end)
     U:Button(f,"Save this location",179,-218,145,28,function() SlashCmdList.ASTHECROWFLIES("remember") end)
-    local note=U:Text(f,"Expressway uses SharedMedia when installed. Ground directions are compass bearings; ETA excludes stops and detours.",11,18,-261,306,65);note:SetWordWrap(true);note:SetTextColor(.68,.71,.76)
+    U:Text(f,"Order by",12,18,-260,90,28)
+    local order=U:Menu(f,112,-260,212,c.profile.routeOrder=="time" and "Estimated time" or "Distance",function() return {{label="Distance",value="distance"},{label="Estimated time",value="time"}} end,function(value)
+        c.profile.routeOrder=value;c:Edit();c:Plan()
+    end);order.value=c.profile.routeOrder
+    local note=U:Text(f,"Expressway uses SharedMedia when installed. Ground directions are compass bearings; ETA excludes stops and detours.",11,18,-303,306,65);note:SetWordWrap(true);note:SetTextColor(.68,.71,.76)
     f:Hide()
 end

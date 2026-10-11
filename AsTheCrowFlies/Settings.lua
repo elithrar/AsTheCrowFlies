@@ -1,5 +1,5 @@
 local _,N=...; local M=N.Model; local S={}; N.Settings=S
-S.defaults={version=1,width=304,scale=1,font="Expressway",locked=false,dock="none",x=24,y=-180,overlays=true,flightPrior=32}
+S.defaults={version=1,width=304,scale=1,font="Expressway",locked=false,dock="none",x=24,y=-180,overlays=true,flightPrior=32,routeOrder="distance"}
 function S.Load(saved,build)
     saved=type(saved)=="table" and saved or {}
     -- Future settings are left intact by the owner and used read-only via defaults.
@@ -11,6 +11,7 @@ function S.Load(saved,build)
     p.flightPrior=math.max(10,math.min(60,p.flightPrior))
     p.x=math.max(-20000,math.min(20000,p.x));p.y=math.max(-20000,math.min(20000,p.y))
     if p.dock~="left" and p.dock~="right" then p.dock="none" end
+    if p.routeOrder~="time" then p.routeOrder="distance" end
     if #p.font>128 then p.font="Expressway" end
     p.version=1
     return p,false
