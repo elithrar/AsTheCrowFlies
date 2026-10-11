@@ -75,11 +75,13 @@ function C:ShowPanel(show)
     self:Refresh()
 end
 function C:Edit(preserveNavigation)
+    self.arrivalUntil=nil
     if not preserveNavigation then self.manualPause=false;V.Stop(self.nav);self.character.intent=nil;self.chosenFlight=nil;N.Overlay:Clear() end
     self.searchGeneration=self.searchGeneration+1;self.matches=nil;self.searching=nil;self.planned=nil
     self.compact=false;self.results={};self:Refresh()
 end
 function C:Back()
+    self.arrivalUntil=nil
     if N.UI.filterButton and N.UI.filterButton:IsMenuOpen() then N.UI.filterButton:CloseMenu();return end
     if N.UI.menu and N.UI.menu:IsShown() then N.UI.menu:Hide();return end
     if N.Options.frame and N.Options.frame:IsShown() then N.Options.frame:Hide();return end
@@ -99,6 +101,7 @@ function C:SearchPosition(origin)
     return not origin and self.origin or A.Position()
 end
 function C:Search(query,origin)
+    self.arrivalUntil=nil
     if origin then self.originQuery=query else self.query=query end
     self.searchGeneration=self.searchGeneration+1;local generation=self.searchGeneration;self.matches=nil;self.results={};self.searching=true;self.searchOrigin=origin;self:Refresh()
     local function run()
@@ -109,6 +112,7 @@ function C:Search(query,origin)
 end
 function C:Choose(p,origin)
     if not p then return end
+    self.arrivalUntil=nil
     self.searchGeneration=self.searchGeneration+1;self.matches=nil;self.searching=nil
     if origin then self.origin=p;self.lastSelection="origin" else self.destination=p;self.lastSelection="destination" end
     self.results={};self:Refresh()
@@ -137,6 +141,7 @@ function C:PrimaryAction()
     return "planned"
 end
 function C:Plan(useCurrent)
+    self.arrivalUntil=nil
     self.searchGeneration=self.searchGeneration+1;self.matches=nil;self.searching=nil;self.planned=true;self.status=nil
     local origin=not useCurrent and self.origin or A.Position()
     if useCurrent then self.origin=nil end
@@ -163,6 +168,7 @@ function C:Plan(useCurrent)
     self:Refresh()
 end
 function C:Go()
+    self.arrivalUntil=nil
     if self.results[self.selected] and self.results[self.selected].unavailable then self.status="Discover the required flight points first.";self:Refresh();return end
     if self.origin then self:Plan(true);self.status="Recalculated from current location. Review, then Go.";self:Refresh();return end
     local r=self.results[self.selected];local p=A.Position()
@@ -174,7 +180,29 @@ function C:Go()
     self:Refresh()
 end
 function C:Stop() self:Edit();self.status=nil;self:Refresh() end
+function C:Arrive()
+    if not self.nav.route then return false end
+    V.Stop(self.nav);self.character.intent=nil;self.manualPause=false;self.chosenFlight=nil;self.expected=nil
+    self.searchGeneration=self.searchGeneration+1;self.searching=nil;self.matches=nil;self.results={};self.planned=nil
+    self.destination=nil;self.origin=nil;self.query="";self.originQuery="";self.searchOrigin=false;self.lastSelection=nil
+    self.highlight=nil;self.selected=1;self.categoryCapped=nil;self.categoryCompared=nil;self.compact=false;self.status=nil
+    N.UI.from:ClearFocus();N.UI.to:ClearFocus()
+    self.arrivalUntil=GetTime()+3;self:Refresh();return true
+end
+function C:InteractionOpened(taxiNodeID)
+    local destination=self.nav.route and self.nav.route.destination
+    if not destination then return false end
+    local ctx=self:Context();if ctx.dead or ctx.onTaxi then return false end
+    local npcID=A.InteractionNPCID()
+    local npcMatch=npcID and npcID==destination.npcID
+    -- Flight-point destinations have taxi IDs, not NPC IDs. Only the freshly
+    -- reconciled taxi window can confirm that destination; intermediate stops cannot.
+    local taxiMatch=A.Number(taxiNodeID) and destination.category=="flight" and destination.id==taxiNodeID and self.data.nodes[taxiNodeID]
+    if npcMatch or taxiMatch then return self:Arrive() end
+    return false
+end
 function C:TaxiOpened()
+    self.taxi=nil
     local p=A.Position();if not p then return end
     A.ObserveMap(p.uiMapID,self.character,self.data.nodes)
     local observation=A.Taxi(p.uiMapID,self.character,self.data);self.taxi=observation
@@ -223,6 +251,7 @@ end
 function C:Tick()
     if not self.ready then return end
     local ctx=self:Context();local p=A.Position();local now=GetTime()
+    if self.arrivalUntil and now>=self.arrivalUntil then self.arrivalUntil=nil;self:Refresh() end
     local chosen=self.chosenFlight
     if chosen and not self.nav.flightSeen and self.nav.state~="flying" and now-chosen.at>10 then self.chosenFlight=nil;chosen=nil end
     local sample
@@ -279,11 +308,22 @@ function C:Initialize()
 end
 local frame=CreateFrame("Frame");C.events=frame
 for _,event in ipairs({"ADDON_LOADED","TAXIMAP_OPENED","TAXIMAP_CLOSED","PLAYER_LOGIN","PLAYER_ENTERING_WORLD","PLAYER_LOGOUT","UI_SCALE_CHANGED","DISPLAY_SIZE_CHANGED"}) do frame:RegisterEvent(event) end
+local npcEvents={}
+for _,event in ipairs({"GOSSIP_SHOW","QUEST_GREETING","QUEST_DETAIL","QUEST_PROGRESS","QUEST_COMPLETE","TRAINER_SHOW","MERCHANT_SHOW","BANKFRAME_OPENED","AUCTION_HOUSE_SHOW"}) do
+    npcEvents[event]=true;frame:RegisterEvent(event)
+end
+local npcInteractionTypes={};local interactionTypes=Enum and Enum.PlayerInteractionType
+for _,name in ipairs({"Gossip","QuestGiver","Merchant","TaxiNode","Trainer","Banker","Vendor","Auctioneer","StableMaster"}) do
+    local value=interactionTypes and interactionTypes[name];if A.Number(value) then npcInteractionTypes[value]=true end
+end
+if next(npcInteractionTypes) then A.Call(frame.RegisterEvent,frame,"PLAYER_INTERACTION_MANAGER_FRAME_SHOW") end
 frame:SetScript("OnEvent",function(_,event,arg)
     if event=="ADDON_LOADED" and arg==ADDON then C:Initialize()
     elseif C.ready then
         if event=="ADDON_LOADED" then N.UI:WatchFonts()
-        elseif event=="TAXIMAP_OPENED" then C:TaxiOpened()
+        elseif npcEvents[event] then C:InteractionOpened()
+        elseif event=="PLAYER_INTERACTION_MANAGER_FRAME_SHOW" and A.Number(arg) and npcInteractionTypes[arg] then C:InteractionOpened()
+        elseif event=="TAXIMAP_OPENED" then C:TaxiOpened();C:InteractionOpened(C.taxi and C.taxi.from)
         elseif event=="TAXIMAP_CLOSED" then
             C.taxi=nil;for _,edge in ipairs(C.data.edges) do if edge.live then edge.offered=false end end
             local function invalidate(route)

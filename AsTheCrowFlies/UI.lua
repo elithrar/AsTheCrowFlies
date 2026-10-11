@@ -1,6 +1,6 @@
 local _,N=...;local M=N.Model;local U={texts={}};N.UI=U
 local MEDIA="Interface\\AddOns\\AsTheCrowFlies\\Media\\"
-local accent={.78,.85,.61};local ink={.93,.94,.97}
+local gold={1,.82,0};local ink={.93,.94,.97}
 -- One checked family for all owned text, including native option controls.
 -- Native font heights are uiUnits: cache their readback, not an exact size echo.
 U.fontRevision=0
@@ -133,7 +133,7 @@ function U:ApplyAppearance()
     if self.destinationName then self.destinationName:SetTextColor(1,.82,0) end
     if self.next then self.next:SetTextColor(1,.82,0) end
     if self.eagle then self.eagle:SetVertexColor(.88,.66,.16) end
-    if self.arrow then self.arrow:SetVertexColor(unpack(colors.accent)) end
+    if self.arrow then self.arrow:SetVertexColor(unpack(gold)) end
 end
 function U:Rectangle(f,color)
     local texture=f:CreateTexture(nil,"BACKGROUND");texture:SetAllPoints(f);texture:SetColorTexture(1,1,1,1)
@@ -216,6 +216,25 @@ function U:NativeIcon(icon,kind)
         end
     end
     texture:SetTexture(nil);return false
+end
+function U:NavigationArrow(texture)
+    texture:SetTexture(nil);texture:SetRotation(0);texture:SetDesaturated(true);texture:SetVertexColor(unpack(gold))
+    local atlas="ui-worldmaparrow-2x"
+    local info=N.Adapter.Call(C_Texture and C_Texture.GetAtlasInfo,atlas)
+    local applied=false
+    if info and M.Number(info.width) and info.width>0 and M.Number(info.height) and info.height>0 and texture.SetAtlas then
+        applied=pcall(texture.SetAtlas,texture,atlas,false,nil,true,"CLAMP","CLAMP")
+        if applied and texture.GetAtlas then applied=texture:GetAtlas()==atlas end
+    end
+    if applied then texture.atcfArrowAsset=atlas;return end
+    -- The same up-facing player arrow in the supported client's native sheet.
+    -- Keep its UV crop when the atlas lookup is unavailable.
+    local ok,result=pcall(texture.SetTexture,texture,6152823,"CLAMP","CLAMP")
+    if ok and result==true then
+        texture:SetTexCoord(1/128,65/128,1/128,65/128);texture.atcfArrowAsset=6152823
+    else
+        texture:SetTexture(MEDIA.."arrow.tga");texture:SetTexCoord(0,1,0,1);texture.atcfArrowAsset="fallback"
+    end
 end
 function U:Icon(b,kind)
     b.text:Hide();b.icons=b.icons or {}
@@ -517,7 +536,7 @@ function U:Create(c)
     self.go=self:Button(f,"Find routes",14,-246,c.profile.width-88,30,function() self.from:ClearFocus();self.to:ClearFocus();c:PrimaryAction() end)
     self.stop=self:Button(f,"",c.profile.width-42,-246,28,28,function() c:Stop() end);self:Icon(self.stop,"close");self:ButtonColor(self.stop,{.52,.12,.14,1},{.70,.18,.20,1});self:Tip(self.stop,"Stop navigation")
     self.guidance=CreateFrame("Frame",nil,f);self.guidance:SetPoint("TOPLEFT",14,-48);self.guidance:SetSize(c.profile.width-28,94)
-    self.arrow=self.guidance:CreateTexture(nil,"ARTWORK");self.arrow:SetTexture(MEDIA.."arrow.tga");self.arrow:SetPoint("TOPLEFT",0,-4);self.arrow:SetSize(32,32);self.arrow:SetVertexColor(unpack(accent))
+    self.arrow=self.guidance:CreateTexture(nil,"ARTWORK");self:NavigationArrow(self.arrow);self.arrow:SetPoint("TOPLEFT",0,-4);self.arrow:SetSize(32,32)
     self.next=self:Text(self.guidance,"",13,44,0,c.profile.width-72,25);self.next.atcfEmphasis=true;self.next.atcfFontScale=1.1;self:Font(self.next,13);self.next:SetTextColor(1,.82,0)
     self.next:SetWordWrap(true);self.next:SetNonSpaceWrap(true);self.next:SetJustifyV("TOP")
     self.cardinal=self:Text(self.guidance,"",11,0,-39,32,16);self.cardinal:SetJustifyH("CENTER")
@@ -527,8 +546,8 @@ function U:Create(c)
     self.expand=self:Button(f,"Edit / routes",14,-147,c.profile.width-154,28,function() c.compact=false;c:Refresh() end)
     self.expand.text.atcfFontScale=1.1;self:Font(self.expand.text,12)
     self.pause=self:Button(f,"",c.profile.width-76,-147,28,28,function()
-        if c.nav.state=="nearby" then c.nav.state="arrived";c.nav.message="Arrival confirmed";c.character.intent=nil
-        else c.manualPause=not c.manualPause;c.nav.measure=nil;c.nav.dwell=nil;c.nav.previous=nil;c.nav.previousTime=nil end;c:Refresh()
+        if c.nav.state=="nearby" then c:Arrive()
+        else c.manualPause=not c.manualPause;c.nav.measure=nil;c.nav.dwell=nil;c.nav.previous=nil;c.nav.previousTime=nil;c:Refresh() end
     end)
     self:PauseIcon(c)
     self.fold=self:Button(f,"Fold",14,-125,50,30,function() c.compact=true;c:Refresh() end)
@@ -648,6 +667,7 @@ function U:Refresh(c)
     if self.menuLock then self.menuLock.text:SetText(c.profile.locked and "Unlock panel" or "Lock panel") end
     local compact=c.compact and c.nav.route~=nil
     local expanded=c.searching or c.matches~=nil or c.destination~=nil or #c.results>0 or c.nav.route~=nil or c.planned
+    local arrival=not expanded and c.arrivalUntil and c.arrivalUntil>GetTime()
     self.resizeGrip:SetShown(not c.profile.locked)
     self.editor:SetShown(not compact);self.body:SetShown(not compact and expanded);self.bodyScroll:SetShown(not compact and expanded);self.guidance:SetShown(compact);self.expand:SetShown(compact);self.go:SetShown(not compact and expanded and (c.matches~=nil or #c.results==0));self.note:SetShown(not compact and expanded)
     self:ScrollIndicator(self.bodyScroll:GetVerticalScroll())
@@ -718,7 +738,7 @@ function U:Refresh(c)
         end
         bodyHeight=math.max(0,bodyHeight-5)
         self.body:SetHeight(math.max(1,bodyHeight))
-        local message=expanded and c.status or nil
+        local message=arrival and "Arrived!" or expanded and c.status or nil
         if not message and c.matches and #c.matches==0 then
             local categories=c.filter.categories or {};local npcSearch=c.searchOrigin or not M.HasFilter(c.filter)
             for key in pairs(categories) do if key~="flight" and key~="place" then npcSearch=true end end
@@ -729,7 +749,8 @@ function U:Refresh(c)
             else message="No matching destinations. Try another name or category." end
         end
         self.note:SetText(message or "");self.note:SetShown(message~=nil)
-        local messageHeight=message and (self:WrappedHeight(self.note,32)+10) or 0
+        self.note:SetTextColor(unpack(arrival and gold or c.profile.colors and c.profile.colors.text or ink))
+        local messageHeight=message and (self:WrappedHeight(self.note,arrival and 16 or 32)+10) or 0
         self.go.text:SetText(c:PrimaryActionLabel());self.go:SetEnabled(not c.searching and not (c.matches and #c.matches==0))
         local foldWidth=math.max(50,math.ceil(self.fold.text:GetUnboundedStringWidth())+16)
         local foldHeight=self:FitAction(self.fold,foldWidth,30)
@@ -737,14 +758,15 @@ function U:Refresh(c)
         local goWidth=math.min(available,math.ceil(self.go.text:GetUnboundedStringWidth())+32)
         local goHeight=self:FitAction(self.go,goWidth,30)
         local footerHeight=math.max(self.go:IsShown() and goHeight or 0,self.fold:IsShown() and foldHeight or 0,self.stop:IsShown() and 28 or 0)+22
+        local bodyGap=bodyHeight>0 and ((self.go:IsShown() or self.fold:IsShown() or self.stop:IsShown()) and 16 or 8) or 0
         local scale=self.resizing and self.frame:GetScale() or math.min(c.profile.scale,UIParent:GetHeight()/660,UIParent:GetWidth()/(c.profile.width+16))
-        local limit=(UIParent:GetHeight()-16)/scale-bodyTop-messageHeight-footerHeight-8
+        local limit=(UIParent:GetHeight()-16)/scale-bodyTop-messageHeight-footerHeight-bodyGap
         local requested=c.profile.resultsHeight
         local resizingResults=self.resizing and self.resizeMode=="results"
         if resizingResults then
             -- Width changes can wrap fixed headings/status text while native
             -- sizing owns the outer frame. Rebudget the viewport immediately.
-            self.resizeChrome=bodyTop+messageHeight+(bodyHeight>0 and 8 or 0)+footerHeight
+            self.resizeChrome=bodyTop+messageHeight+bodyGap+footerHeight
             requested=math.max(1,math.min(560,self.frame:GetHeight()-self.resizeChrome))
             c.profile.resultsHeight=math.max(100,requested)
         end
@@ -766,14 +788,14 @@ function U:Refresh(c)
         local y=bodyTop+visible
         if bodyHeight>0 then
             self.resultsBoundary:SetShown(self.bodyScrollRange>0);self.resultsBoundary:ClearAllPoints();self.resultsBoundary:SetPoint("TOPLEFT",14,-y-4);self.resultsBoundary:SetWidth(c.profile.width-28)
-            y=y+8
+            y=y+bodyGap
         end
         self.note:ClearAllPoints();self.note:SetPoint("TOPLEFT",14,-y)
         local footer=y+messageHeight
         self.go:ClearAllPoints();self.go:SetPoint("TOPLEFT",(c.nav.route and foldWidth+24 or 14)+(available-goWidth)/2,-footer)
         self.stop:ClearAllPoints();self.stop:SetPoint("TOPLEFT",c.profile.width-42,-footer)
         self.fold:ClearAllPoints();self.fold:SetPoint("TOPLEFT",14,-footer)
-        if not resizingResults then self.frame:SetHeight(expanded and (footer+footerHeight) or 139) end
+        if not resizingResults then self.frame:SetHeight((expanded or arrival) and (footer+footerHeight) or 139) end
     end
     self:Layout(c)
 end

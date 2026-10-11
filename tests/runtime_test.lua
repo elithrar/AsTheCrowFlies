@@ -155,6 +155,7 @@ C_Map={GetBestMapForUnit=function() return 1429 end,GetPlayerMapPosition=functio
     GetMapInfo=function(id) return {name='Elwynn',mapID=id} end}
 C_Minimap={GetViewRadius=function() return 100 end,IsRotateMinimapIgnored=function() return false end}
 C_Texture={GetAtlasInfo=function(name) if name=='gamepad-hud-icon-filter' then return {width=16,height=16} end end}
+Enum={PlayerInteractionType={Item=1,TradePartner=2,Gossip=3,QuestGiver=4,Merchant=5,TaxiNode=6,Trainer=7,Banker=8,Auctioneer=21,StableMaster=22,WorldMap=27}}
 C_TaxiMap={GetTaxiNodesForMap=function() return {{nodeID=1,faction=2,isUndiscovered=false},{nodeID=2,faction=2,isUndiscovered=true}} end}
 function TakeTaxiNode(slot) end
 function hooksecurefunc(name,fn) hooks[name]=fn end
@@ -446,19 +447,19 @@ end
 
 test('Classic color picker hide-before-callback cancel and Okay preserve their meaning',function()
     local O=N.Options;local saved=ColorPickerFrame;ColorPickerFrame=classicPicker();local picker=ColorPickerFrame
-    local original=N.Model.Copy(C.profile.colors.accent)
-    O:Color('accent');assert(O.colorEdit and picker:IsShown(),'initial hidden OnColorSelect must not end ownership')
-    picker.rgb={.21,.32,.43};picker.info.swatchFunc();assert(C.profile.colors.accent[1]==.21)
-    picker:Hide();picker.info.cancelFunc();assert(C.profile.colors.accent[1]==original[1] and not O.colorEdit)
-    O:Color('accent');picker.rgb={.31,.42,.53}
+    local original=N.Model.Copy(C.profile.colors.text)
+    O:Color('text');assert(O.colorEdit and picker:IsShown(),'initial hidden OnColorSelect must not end ownership')
+    picker.rgb={.21,.32,.43};picker.info.swatchFunc();assert(C.profile.colors.text[1]==.21)
+    picker:Hide();picker.info.cancelFunc();assert(C.profile.colors.text[1]==original[1] and not O.colorEdit)
+    O:Color('text');picker.rgb={.31,.42,.53}
     -- Classic Okay hides, then invokes the final swatch callback.
-    picker:Hide();picker.info.swatchFunc();assert(C.profile.colors.accent[1]==.31 and not O.colorEdit)
-    O:Color('accent');local current=O.colorEdit
+    picker:Hide();picker.info.swatchFunc();assert(C.profile.colors.text[1]==.31 and not O.colorEdit)
+    O:Color('text');local current=O.colorEdit
     local pending=timers;timers={};for _,fn in ipairs(pending) do fn() end
     assert(O.colorEdit==current and picker:IsShown(),'older hide cleanup must not cancel a reopened session')
     picker.rgb={.51,.62,.73};picker.info.swatchFunc();O:CloseColor()
-    assert(not picker:IsShown() and C.profile.colors.accent[1]==.31 and O.colors.accent.swatch.color[1]==.31)
-    C.profile.colors.accent=original;C:ApplyProfile();ColorPickerFrame=saved
+    assert(not picker:IsShown() and C.profile.colors.text[1]==.31 and O.colors.text.swatch.color[1]==.31)
+    C.profile.colors.text=original;C:ApplyProfile();ColorPickerFrame=saved
 end)
 
 test('shared color picker takeover never hides another addon or applies stale callbacks',function()
@@ -1424,5 +1425,238 @@ test('row tooltip ownership survives stale leave and clears when its row view or
     assert(tip.TextLeft1.textColor[1]==.76 and tip.TextLeft1.textColor[2]==.78,'panel appearance cannot recolor the owned tooltip')
     first.scripts.OnEnter();assert(tip.measuredText.path=='Fonts\\ARIALN.TTF' and tip.measuredText.size==11 and tip:GetScale()==1)
     first.scripts.OnLeave();C.profile=saved;C.destination=nil;C:Stop();C:ApplyProfile()
+end)
+test('interaction identity uses only an ordinary NPC GUID with guarded native or strict fallback parsing',function()
+    local savedGUID,savedInfo,savedSecret=UnitGUID,C_CreatureInfo,issecretvalue
+    local guid='Creature-0-1234-0-0-1498-000000ABCD';local calls=0
+    UnitGUID=function(unit) assert(unit=='npc','interaction identity must never inspect target or mouseover');return guid end
+    C_CreatureInfo={GetCreatureID=function(value) calls=calls+1;assert(value==guid);return 1498 end}
+    assert(A.InteractionNPCID()==1498 and calls==1)
+    C_CreatureInfo=nil;assert(A.InteractionNPCID()==1498)
+    guid='Vehicle-0-1234-0-0-1498-000000ABCD';assert(A.InteractionNPCID()==1498)
+    for _,invalid in ipairs({'Player-0-1234-0-0-1498-000000ABCD','Pet-0-1234-0-0-1498-000000ABCD','GameObject-0-1234-0-0-1498-000000ABCD','Creature-1498','Creature-0-1234-0-0-0-000000ABCD','Creature-0-1234-0-0-name-000000ABCD'}) do
+        guid=invalid;assert(A.InteractionNPCID()==nil)
+    end
+    guid='Creature-0-1234-0-0-1498-000000ABCD'
+    for _,invalid in ipairs({false,0,-1,1.5,math.huge,0/0,'1498'}) do
+        C_CreatureInfo={GetCreatureID=function() return invalid end};assert(A.InteractionNPCID()==nil,'available native getter failure must not silently parse around its result')
+    end
+    C_CreatureInfo={GetCreatureID=function() error('unavailable') end};assert(A.InteractionNPCID()==nil)
+    local secret=setmetatable({},{__index=function() error('secret GUID was inspected') end,__eq=function() error('secret identity was compared') end})
+    issecretvalue=function(value) return rawequal(value,secret) end
+    guid=secret;assert(A.InteractionNPCID()==nil)
+    guid='Creature-0-1234-0-0-1498-000000ABCD';C_CreatureInfo.GetCreatureID=function() return secret end;assert(A.InteractionNPCID()==nil)
+    UnitGUID=function() error('unit unavailable') end;assert(A.InteractionNPCID()==nil)
+    UnitGUID=nil;assert(A.InteractionNPCID()==nil)
+    UnitGUID,C_CreatureInfo,issecretvalue=savedGUID,savedInfo,savedSecret
+end)
+
+local function arrivalFixture()
+    local saved={data=C.data,destinations=C.destinations,filter=C.filter,provider=C.provider,guid=UnitGUID,creature=C_CreatureInfo,secret=issecretvalue,position=A.Position,now=now,x=playerX,y=playerY}
+    C:Stop();C:ShowPanel(true);C.origin=nil;C.destination=nil;C.taxi=nil;C.query='';C.originQuery='';C.matches=nil;C.searching=nil;C.filter={categories={},classes={},professions={}};timers={};onTaxi=false;dead=false
+    C.data={nodes={},edges={}};local p=A.Position();local goal=N.Model.Copy(p);goal.x=p.x+400;goal.id='arrival-npc';goal.npcID=1498;goal.name='Arrival trainer';goal.category='class';goal.confidence='provider';goal.mobile=true
+    C.destinations={goal};C_CreatureInfo=nil
+    UnitGUID=function(unit) assert(unit=='npc');return 'Creature-0-1234-0-0-1498-000000ABCD' end
+    local function start(destination)
+        A.Position=saved.position;onTaxi=false;dead=false;C.taxi=nil;C.origin=nil;C:Stop();C:Choose(destination or goal)
+        local route=N.Routes.Summary({{mode='walk',start=p,finish=destination or goal,distance=N.Model.Distance(p,destination or goal),quality='bearing'}},destination or goal,C:Context())
+        C.results={route};C.selected=1;C:Go();assert(C.nav.route==route);return route
+    end
+    local function cleanup()
+        A.Position=saved.position;UnitGUID,C_CreatureInfo,issecretvalue=saved.guid,saved.creature,saved.secret
+        onTaxi=false;dead=false;now=saved.now;playerX,playerY=saved.x,saved.y;C:Stop();C.origin=nil;C.destination=nil;C.query='';C.originQuery='';C.searchOrigin=nil;C.taxi=nil;C.expected=nil
+        C.data=saved.data;C.destinations=saved.destinations;C.filter=saved.filter;C.provider=saved.provider;C:ShowPanel(true);timers={}
+    end
+    return goal,start,cleanup
+end
+
+test('only genuine NPC show events complete the active destination rather than a preview or target',function()
+    local goal,start,cleanup=arrivalFixture();local route=start()
+    local preview=N.Model.Copy(goal);preview.id='preview-npc';preview.npcID=999;C:Choose(preview)
+    UnitGUID=function(unit) return unit=='npc' and 'Creature-0-1234-0-0-999-000000ABCD' or nil end
+    C.events.scripts.OnEvent(nil,'GOSSIP_SHOW');assert(C.nav.route==route and not C.arrivalUntil,'preview identity cannot complete the active route')
+    UnitGUID=function(unit) return unit=='target' and 'Creature-0-1234-0-0-1498-000000ABCD' or nil end
+    C.events.scripts.OnEvent(nil,'GOSSIP_SHOW');assert(C.nav.route==route,'targeting the destination is not an interaction')
+    UnitGUID=function() return 'Creature-0-1234-0-0-1498-000000ABCD' end
+    C.events.scripts.OnEvent(nil,'PLAYER_TARGET_CHANGED');assert(C.nav.route==route and not C.events.events.PLAYER_TARGET_CHANGED)
+    local kinds=Enum.PlayerInteractionType
+    C.events.scripts.OnEvent(nil,'PLAYER_INTERACTION_MANAGER_FRAME_SHOW',kinds.Item);assert(C.nav.route==route)
+    C.events.scripts.OnEvent(nil,'PLAYER_INTERACTION_MANAGER_FRAME_SHOW',kinds.TradePartner);assert(C.nav.route==route)
+    C.events.scripts.OnEvent(nil,'PLAYER_INTERACTION_MANAGER_FRAME_SHOW',kinds.WorldMap);assert(C.nav.route==route)
+    local secret=setmetatable({},{__eq=function() error('secret interaction type compared') end})
+    issecretvalue=function(value) return rawequal(value,secret) end
+    C.events.scripts.OnEvent(nil,'PLAYER_INTERACTION_MANAGER_FRAME_SHOW',secret);assert(C.nav.route==route);issecretvalue=nil
+    for _,event in ipairs({'GOSSIP_SHOW','QUEST_GREETING','QUEST_DETAIL','QUEST_PROGRESS','QUEST_COMPLETE','TRAINER_SHOW','MERCHANT_SHOW','BANKFRAME_OPENED','AUCTION_HOUSE_SHOW'}) do
+        start();assert(C.events.events[event],'missing supported interaction registration: '..event)
+        C.events.scripts.OnEvent(nil,event);assert(not C.nav.route and C.arrivalUntil,'matching interaction did not complete: '..event)
+    end
+    for _,kind in ipairs({kinds.Gossip,kinds.QuestGiver,kinds.Merchant,kinds.Trainer,kinds.Banker,kinds.Auctioneer,kinds.StableMaster}) do
+        start();C.events.scripts.OnEvent(nil,'PLAYER_INTERACTION_MANAGER_FRAME_SHOW',kind);assert(not C.nav.route and C.arrivalUntil)
+    end
+    cleanup()
+end)
+
+test('NPC interaction ignores unavailable identity death and taxi but accepts a paused mobile destination without coordinates',function()
+    local goal,start,cleanup=arrivalFixture();local route=start();local valid='Creature-0-1234-0-0-1498-000000ABCD'
+    for _,read in ipairs({function() return nil end,function() return 'Player-0-1234-0-0-1498-000000ABCD' end,function() error('restricted unit') end}) do
+        UnitGUID=read;C.events.scripts.OnEvent(nil,'QUEST_DETAIL');assert(C.nav.route==route and not C.arrivalUntil)
+    end
+    local secret={};issecretvalue=function(value) return rawequal(value,secret) end;UnitGUID=function() return secret end
+    C.events.scripts.OnEvent(nil,'GOSSIP_SHOW');assert(C.nav.route==route);issecretvalue=nil
+    UnitGUID=function() return valid end;C_CreatureInfo={GetCreatureID=function() error('restricted getter') end}
+    C.events.scripts.OnEvent(nil,'GOSSIP_SHOW');assert(C.nav.route==route);C_CreatureInfo=nil
+    dead=true;C.events.scripts.OnEvent(nil,'TRAINER_SHOW');assert(C.nav.route==route);dead=false
+    onTaxi=true;C.events.scripts.OnEvent(nil,'TRAINER_SHOW');assert(C.nav.route==route);onTaxi=false
+    C.manualPause=true;C.nav.state='paused';C.nav.suspendedState='walking';A.Position=function() return nil end
+    C.events.scripts.OnEvent(nil,'TRAINER_SHOW');assert(not C.nav.route and C.arrivalUntil and not C.manualPause,'actual matching service interaction supersedes missing position and a user pause')
+    cleanup()
+end)
+
+test('arrival resets transient navigation and queued search while preserving profiles character knowledge and placement',function()
+    local goal,start,cleanup=arrivalFixture();start();local profile,character,known,timings,places=C.profile,C.character,C.character.known,C.character.timings,C.character.places
+    local dock,position,strata,width,scale=profile.dock,profile.dockPosition,profile.strata,profile.width,profile.scale
+    C:Search('queued origin',true);local generation=C.searchGeneration
+    C.origin=goal;C.destination=goal;C.matches={goal};C.planned=true;C.lastSelection='origin';C.status='stale';C.chosenFlight={from=1,to=2};C.expected={from=1,to=2}
+    C.hidden=true;C.tucked=true;U.from:SetFocus();U.to:SetFocus();local at=now
+    C.events.scripts.OnEvent(nil,'TRAINER_SHOW')
+    assert(not C.nav.route and C.nav.state=='editing' and not C.character.intent and not C.chosenFlight and not C.expected)
+    assert(not C.origin and not C.destination and not C.matches and not C.searching and not C.planned and not C.searchOrigin and not C.lastSelection and #C.results==0)
+    assert((C.query or '')=='' and (C.originQuery or '')=='' and not C.compact and not U.from:HasFocus() and not U.to:HasFocus())
+    assert(C.searchGeneration>generation and C.arrivalUntil==at+3 and C.hidden and C.tucked)
+    assert(C.profile==profile and C.character==character and character.known==known and character.timings==timings and character.places==places)
+    assert(profile.dock==dock and profile.dockPosition==position and profile.strata==strata and profile.width==width and profile.scale==scale)
+    local queued=timers;timers={};for _,fn in ipairs(queued) do fn() end
+    assert(not C.matches and not C.searching and not C.origin and not C.destination,'the canceled search cannot revive editor selections')
+    now=at+1;C.events.scripts.OnEvent(nil,'GOSSIP_SHOW');assert(C.arrivalUntil==at+3,'duplicate interaction events cannot extend arrival')
+    C:ShowPanel(true);now=at+2.9;C:Tick();assert(C.arrivalUntil and U.note:GetText()=='Arrived!')
+    now=at+3.1;C:Tick();assert(not C.arrivalUntil and not U.note:IsShown() and not C.nav.route)
+    cleanup()
+end)
+
+test('arrival confirmation returns to the editor and a new search replaces the transient notice immediately',function()
+    local goal,start,cleanup=arrivalFixture();start();C.nav.state='nearby';C:Refresh()
+    assert(U.pause.iconKind=='done');U.pause.scripts.OnClick()
+    assert(not C.nav.route and C.arrivalUntil and not C.compact and U.editor:IsShown() and not U.guidance:IsShown())
+    assert(U.note:IsShown() and U.note:GetText()=='Arrived!' and U.note.justifyH=='CENTER')
+    C:Search('Arrival',false);assert(not C.arrivalUntil and U.note:GetText()~='Arrived!')
+    local queued=timers;timers={};for _,fn in ipairs(queued) do fn() end;assert(#C.matches==1 and C.matches[1]==goal)
+    C:Stop();C:Arrive();assert(not C.arrivalUntil,'arrival without an active route must not create a success notice')
+    cleanup()
+end)
+
+test('flight destination arrival requires the fresh reconciled final taxi node and never a cached or earlier master',function()
+    local _,start,cleanup=arrivalFixture();local savedAll,savedMap,savedRoutes=C_TaxiMap.GetAllTaxiNodes,C_TaxiMap.GetTaxiNodesForMap,GetNumRoutes
+    local p=A.Position();local source=N.Model.Copy(p);source.id=301;source.name='First master';source.category='flight'
+    local goal=N.Model.Copy(p);goal.id=303;goal.x=p.x+500;goal.name='Final master';goal.category='flight';C.data.nodes={[301]=source,[303]=goal}
+    C_TaxiMap.GetTaxiNodesForMap=function() return {} end;GetNumRoutes=function() return 0 end
+    C_TaxiMap.GetAllTaxiNodes=function() return {{nodeID=301,state=0,slotIndex=1}} end
+    local route=start(goal);UnitGUID=function() return nil end
+    C.events.scripts.OnEvent(nil,'TAXIMAP_OPENED');assert(C.nav.route==route and C.taxi.from==301,'opening an earlier master cannot complete the final destination')
+    C.taxi={from=303,offers={}};local position=A.Position;A.Position=function() return nil end
+    C.events.scripts.OnEvent(nil,'TAXIMAP_OPENED');assert(C.nav.route==route and not C.arrivalUntil,'cached taxi context cannot stand in for this interaction')
+    A.Position=position;C_TaxiMap.GetAllTaxiNodes=function() return {{nodeID=303,state=0,slotIndex=1}} end
+    C.events.scripts.OnEvent(nil,'TAXIMAP_OPENED');assert(C.nav.route==route and not C.taxi,'an unreconciled final node must not complete arrival')
+    playerY=playerY+.25;C.events.scripts.OnEvent(nil,'TAXIMAP_OPENED');assert(not C.nav.route and C.arrivalUntil,'opening the actual reconciled final flight point confirms arrival')
+    C_TaxiMap.GetAllTaxiNodes,C_TaxiMap.GetTaxiNodesForMap,GetNumRoutes=savedAll,savedMap,savedRoutes;cleanup()
+end)
+test('map projection retains authoritative city coordinates and composes only proven parent map rectangles',function()
+    local inverse,info,rect=C_Map.GetMapPosFromWorldPos,C_Map.GetMapInfo,C_Map.GetMapRectOnMap
+    local p={map=0,x=120,y=240,uiMapID=1453,mx=.25,my=.5};local parents={[1453]=1415,[1415]=947}
+    C_Map.GetMapPosFromWorldPos=function() return nil end
+    C_Map.GetMapInfo=function(id) return {parentMapID=parents[id]} end
+    C_Map.GetMapRectOnMap=function(child,parent)
+        if child==1453 and parent==1415 then return .2,.4,.1,.5 end
+        if child==1415 and parent==947 then return .1,.9,.2,.8 end
+        error('projection requested an unproven map relationship')
+    end
+    local x,y=A.Project(p,1453);assert(x==.25 and y==.5,'optional inverse must not hide a known position on its own map')
+    x,y=A.Project(p,1415);assert(math.abs(x-.25)<.00001 and math.abs(y-.3)<.00001)
+    x,y=A.Project(p,947);assert(math.abs(x-.3)<.00001 and math.abs(y-.38)<.00001)
+    assert(not A.Project(p,1454) and not A.Project(p,14531),'no sibling zone or other floor projection')
+    parents[1415]=1453;assert(not A.Project(p,947),'cycles terminate without a fabricated pin');parents[1415]=947
+    C_Map.GetMapRectOnMap=function() return nil end;assert(not A.Project(p,947),'missing native rectangle fails closed')
+    local secret=setmetatable({},{__lt=function() error('secret compared') end,__sub=function() error('secret subtracted') end})
+    issecretvalue=function(value) return rawequal(value,secret) end
+    C_Map.GetMapInfo=function() return {parentMapID=secret} end;assert(not A.Project(p,947))
+    C_Map.GetMapInfo=function(id) return {parentMapID=parents[id]} end
+    C_Map.GetMapRectOnMap=function() return secret,.8,.1,.9 end;assert(not A.Project(p,947))
+    C_Map.GetMapPosFromWorldPos=function() return secret,CreateVector2D(.5,.5) end
+    C_Map.GetMapRectOnMap=function() return .8,.2,.1,.9 end;assert(not A.Project(p,947),'reversed rectangle is invalid')
+    issecretvalue=nil;C_Map.GetMapPosFromWorldPos=function() return nil end
+    for _,bad in ipairs({-1,1.1,0/0,math.huge}) do local invalid=N.Model.Copy(p);invalid.mx=bad;assert(not A.Project(invalid,1453)) end
+    C_Map.GetMapPosFromWorldPos=function(_,_,id) return id,CreateVector2D(1.2,-.2) end
+    local worldOnly={map=0,x=120,y=240};assert(not A.Project(worldOnly,947))
+    x,y=A.Project(worldOnly,947,true);assert(x==1.2 and y==-.2,'flight geometry still reaches the clipping stage outside canvas bounds')
+    C_Map.GetMapPosFromWorldPos,C_Map.GetMapInfo,C_Map.GetMapRectOnMap=inverse,info,rect
+end)
+
+test('selected NPC keeps its native map pin when the optional inverse is unavailable',function()
+    C:Stop();C:ShowPanel(true);C.origin=nil;C.destination=nil;C.results={};local inverse=C_Map.GetMapPosFromWorldPos
+    local mapID,shown,enabled=WorldMapFrame.GetMapID,WorldMapFrame:IsShown(),C.profile.mapMarkers
+    WorldMapFrame.GetMapID=function() return 1429 end;WorldMapFrame:Show();C.profile.mapMarkers=true
+    local goal=A.FromMap(1429,.2,.7);goal.name='Mapped trainer';goal.id='mapped-trainer';goal.npcID=1498;goal.category='class'
+    C_Map.GetMapPosFromWorldPos=function() return nil end;C:Choose(goal);local pin=N.Overlay.destination
+    assert(pin:IsShown() and pin.caption=='Destination: Mapped trainer' and pin.point[4]==.2*canvas:GetWidth() and pin.point[5]==-.7*canvas:GetHeight())
+    C_Map.GetMapPosFromWorldPos=inverse;WorldMapFrame.GetMapID=mapID;WorldMapFrame:SetShown(shown);C.profile.mapMarkers=enabled;C.destination=nil;C:Stop()
+end)
+
+test('native navigation arrows preserve atlas UVs and fixed gold through both guarded artwork fallbacks',function()
+    local atlas=C_Texture.GetAtlasInfo;local texture=U.guidance:CreateTexture();texture:SetSize(32,32);texture:SetPoint('TOPLEFT',0,-4)
+    C_Texture.GetAtlasInfo=function(name) if name=='ui-worldmaparrow-2x' then return {width=64,height=64} end end
+    texture:SetRotation(2);U:NavigationArrow(texture)
+    assert(texture.atcfArrowAsset=='ui-worldmaparrow-2x' and texture.atlas=='ui-worldmaparrow-2x' and texture.coords[1]==.1 and texture.coords[2]==.2)
+    assert(texture.rotation==0 and texture.desaturated and texture.color[1]==1 and texture.color[2]==.82 and texture.color[3]==0)
+    assert(texture:GetWidth()==32 and texture:GetHeight()==32 and texture.point[1]=='TOPLEFT')
+    C_Texture.GetAtlasInfo=function() return nil end;texture:SetRotation(1);U:NavigationArrow(texture)
+    assert(texture.atcfArrowAsset==6152823 and texture.texture==6152823 and texture.coords[1]==1/128 and texture.coords[2]==65/128 and texture.coords[3]==1/128 and texture.coords[4]==65/128 and texture.rotation==0)
+    texture.SetTexture=function(self,path,...) if path==6152823 then return false end;return methods.SetTexture(self,path,...) end
+    U:NavigationArrow(texture);assert(texture.atcfArrowAsset=='fallback' and texture.texture:find('Media\\arrow.tga',1,true) and texture.coords[1]==0 and texture.coords[2]==1 and texture.coords[3]==0 and texture.coords[4]==1)
+    local accent=C.profile.colors.accent;C.profile.colors.accent={.1,.2,.3};U:ApplyAppearance();assert(U.arrow.color[1]==1 and U.arrow.color[2]==.82 and U.arrow.color[3]==0,'profile accent cannot tint the player-facing arrow away from native gold')
+    C.profile.colors.accent=accent;C_Texture.GetAtlasInfo=atlas;C:ApplyProfile()
+end)
+
+test('populated result view leaves a stable sixteen pixel footer gap at supported widths scales and font sizes',function()
+    C:Stop();C:ShowPanel(true);local saved=N.Model.Copy(C.profile);local goal=A.Position();goal.id='footer-gap';goal.name=string.rep('Trainer name ',4);goal.category='class'
+    C.destination=nil;C.origin=nil;C.matches={};C.highlight=1;C.status=nil;for i=1,40 do C.matches[i]=goal end
+    for _,width in ipairs({220,240,640}) do for _,size in ipairs({10,18}) do for _,scale in ipairs({.75,1.5}) do
+        C.profile.width=width;C.profile.fontSize=size;C.profile.scale=scale;C:ApplyProfile()
+        local endOfRows=U.bodyTop+U.bodyScroll:GetHeight();local buttonTop=-U.go.point[3]
+        assert(U.go:IsShown() and U.resultsBoundary:IsShown() and math.abs(buttonTop-endOfRows-16)<.001)
+        assert(math.abs(buttonTop-(-U.resultsBoundary.point[3])-12)<.001,'boundary and action must not visually touch')
+        assert(buttonTop+U.go:GetHeight()+22<=U.frame:GetHeight()+.001,'footer retains resize-grip clearance')
+        assert(U.frame:GetHeight()*U.frame:GetScale()<=UIParent:GetHeight()+.001,'larger font and scale still fit the display')
+    end end end
+    C.profile=saved;C:Stop();C:ApplyProfile()
+end)
+test('editor actions clear arrival notice before changing the current input or view',function()
+    local goal,start,cleanup=arrivalFixture()
+    for _,action in ipairs({function() C:Edit(true) end,function() C:Choose(goal) end,function() C:Plan() end,function() C:Go() end,function() C:Back() end}) do
+        C:ShowPanel(true);start();assert(C:Arrive() and C.arrivalUntil);action();assert(not C.arrivalUntil and U.note:GetText()~='Arrived!')
+    end
+    cleanup()
+end)
+
+test('map pins retain normalized position and readable size across zoom while native arrows revert cleanly to preview crows',function()
+    C:Stop();C:ShowPanel(true);C.origin=nil;C.destination=nil;C.results={};local mapScale,mapID=WorldMapFrame.GetCanvasScale,WorldMapFrame.GetMapID
+    local oldScale,shown=canvas:GetScale(),WorldMapFrame:IsShown();local oldMap,oldMini=C.profile.mapMarkers,C.profile.minimapMarkers
+    local zoom=1;WorldMapFrame.GetCanvasScale=function() return zoom end;WorldMapFrame.GetMapID=function() return 1429 end;WorldMapFrame:Show();C.profile.mapMarkers=true;C.profile.minimapMarkers=true
+    local goal=A.FromMap(1429,.52,.5);goal.name='Native arrow destination';goal.id='zoom-goal';C:Choose(goal)
+    local O=N.Overlay;local pin=O.destination;local p=A.Position();local route=N.Routes.Summary({{mode='walk',start=p,finish=goal,distance=N.Model.Distance(p,goal)}},goal,C:Context())
+    C.results={route};C.selected=1;C:Go();assert(C.nav.route==route and pin.arrow and pin.icon.atcfArrowAsset)
+    assert(pin.icon.color[1]==1 and pin.icon.color[2]==.82 and O.icon.color[1]==1 and O.icon.color[2]==.82)
+    for _,value in ipairs({.5,1,2}) do
+        zoom=value;canvas:SetScale(value);O:Update(C,p,{facing=0,speed=7})
+        assert(O.destination==pin and pin:IsShown() and math.abs(pin:GetWidth()*pin:GetEffectiveScale()-18)<.001)
+        assert(math.abs(pin.point[4]/(canvas:GetWidth()*zoom)-goal.mx)<.001 and math.abs(-pin.point[5]/(canvas:GetHeight()*zoom)-goal.my)<.001,'compensated scale must preserve the map point')
+    end
+    local preview=A.FromMap(1429,.6,.4);preview.name='Other preview';preview.id='zoom-preview';C:Choose(preview);O:Update(C,p,{facing=0,speed=7})
+    assert(not pin.arrow and pin.icon.texture:find('Media\\eagle.tga',1,true) and not pin.icon.desaturated and pin.icon.rotation==0)
+    assert(pin.icon.coords[1]==0 and pin.icon.coords[2]==1 and O.map:IsShown() and O.map.arrow and O.map.icon.atcfArrowAsset)
+    assert(O.miniMode=='arrow' and O.icon.atcfArrowAsset,'previewing elsewhere retains the active minimap direction')
+    local allocated=#frames;for _=1,5 do O:Update(C,p,{facing=0,speed=7}) end;assert(#frames==allocated and O.destination==pin)
+    C:Stop();O:Update(C,p,{facing=0,speed=7})
+    assert(O.miniMode=='eagle' and O.icon.texture:find('Media\\eagle.tga',1,true) and not O.icon.desaturated and O.icon.rotation==0)
+    assert(O.icon.coords[1]==0 and O.icon.coords[2]==1 and O.icon.coords[3]==0 and O.icon.coords[4]==1 and not O.map:IsShown())
+    canvas:SetScale(oldScale);WorldMapFrame.GetCanvasScale=mapScale;WorldMapFrame.GetMapID=mapID;WorldMapFrame:SetShown(shown);C.profile.mapMarkers=oldMap;C.profile.minimapMarkers=oldMini;C.destination=nil;C:Stop()
 end)
 print('PASS runtime scenarios: '..count..'; frames allocated='..#frames)
