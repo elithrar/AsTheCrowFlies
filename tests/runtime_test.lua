@@ -34,7 +34,30 @@ function methods:SetBackdropBorderColor(...) self.borderColor={...} end
 function methods:GenerateMenu() self.generated=(self.generated or 0)+1 end
 function methods:CloseMenu() self.menuClosed=true;self.menuOpen=false end
 function methods:IsMenuOpen() return self.menuOpen==true end
-function methods:GetStringHeight() local _,lines=(self.text or ''):gsub('\n','');return (lines+1)*(self.fontSize or 12) end
+function methods:GetUnboundedStringWidth()
+    local longest=0;for line in ((self.text or '')..'\n'):gmatch('(.-)\n') do longest=math.max(longest,#line) end
+    return longest*(self.fontSize or 12)*.55
+end
+function methods:GetStringHeight()
+    local size=self.fontSize or 12;local lines=0
+    for line in ((self.text or '')..'\n'):gmatch('(.-)\n') do
+        lines=lines+(self.wordWrap and math.max(1,math.ceil(#line*size*.55/math.max(1,self.w or 100))) or 1)
+    end
+    local height=lines*size;return self.h and self.h>0 and math.min(height,self.h) or height
+end
+function methods:SetWordWrap(value) self.wordWrap=value end
+function methods:SetNonSpaceWrap(value) self.nonSpaceWrap=value end
+function methods:SetJustifyH(value) self.justifyH=value end
+function methods:SetJustifyV(value) self.justifyV=value end
+function methods:SetMinMaxValues(a,b) self.minimum=a;self.maximum=b end
+function methods:SetValue(value) self.value=value;if self.scripts.OnValueChanged then self.scripts.OnValueChanged(self,value) end end
+function methods:SetValueStep(value) self.valueStep=value end
+function methods:SetObeyStepOnDrag(value) self.obeyStep=value end
+function methods:SetOrientation(value) self.orientation=value end
+function methods:SetHitRectInsets(...) self.hitInsets={...} end
+function methods:SetScrollChild(child) self.scrollChild=child end
+function methods:SetVerticalScroll(value) self.scroll=value;if self.scripts.OnVerticalScroll then self.scripts.OnVerticalScroll(self,value) end end
+function methods:GetVerticalScroll() return self.scroll or 0 end
 function methods:GetLeft() return 20 end
 function methods:GetTop() return 600 end
 function methods:SetTexture(v) self.texture=v;return true end
@@ -47,7 +70,7 @@ function methods:ClearFocus() self.focus=false end
 function methods:SetFocus() self.focus=true end
 function methods:SetChecked(v) self.checked=v end
 function methods:GetChecked() return self.checked end
-local noop={'SetAllPoints','SetJustifyH','SetJustifyV','SetShadowColor','SetShadowOffset','SetWordWrap','SetAutoFocus','SetMaxLetters','SetTextInsets','HighlightText','SetMovable','EnableMouse','SetClampedToScreen','SetFrameStrata','RegisterForDrag','StartMoving','StopMovingOrSizing','EnableMouseWheel','SetOwner','SetDrawLayer'}
+local noop={'SetAllPoints','SetShadowColor','SetShadowOffset','SetAutoFocus','SetMaxLetters','SetTextInsets','HighlightText','SetMovable','EnableMouse','SetClampedToScreen','SetFrameStrata','RegisterForDrag','StartMoving','StopMovingOrSizing','EnableMouseWheel','SetOwner','SetDrawLayer'}
 for _,name in ipairs(noop) do methods[name]=function() end end
 local function object(name)
     local f=setmetatable({scripts={},events={},name=name},{__index=methods});frames[#frames+1]=f;if name then _G[name]=f end;return f
@@ -61,7 +84,7 @@ function methods:SetColorTexture(...) self.color={...} end
 function methods:CreateFontString() return object() end
 function CreateFont(name) return object(name) end
 function CreateFrame(kind,name,parent,template)
-    local f=object(name);f.parent=parent;f.kind=kind
+    local f=object(name);f.parent=parent;f.kind=kind;f.template=template
     if kind=='DropdownButton' then f.Text=object() end;return f
 end
 UIParent=object();UIParent:SetSize(1920,1080);Minimap=object();Minimap:SetSize(180,180)
@@ -410,7 +433,6 @@ test('bounded trainer results retain width across compact state and reflow profi
     local p=A.Position();local goal=N.Model.Copy(p);goal.id='layout-goal';goal.name='A long localized destination name';goal.x=p.x+500
     local route=N.Routes.Summary({{mode='walk',start=p,finish=goal,distance=500,quality='bearing'}},goal,C:Context())
     C.filter={categories={class=true},classes={MAGE=true},professions={}};C.results={route,route,route};C.matches=nil;C.nav.route=route;C.nav.leg=1;C.nav.state='walking';C.profile.scale=1.6
-    local measurements={};for i,row in ipairs(U.rows) do measurements[i]=row.detail.GetStringHeight;row.detail.GetStringHeight=function() return 999 end end
     C.nav.route=nil;C.compact=false;C.status=nil;C:Refresh()
     assert(not U.go:IsShown() and not U.stop:IsShown() and not U.fold:IsShown())
     assert(U.frame:GetHeight()==125+U.body:GetHeight()+8,'results without footer controls retain only bottom padding')
@@ -419,7 +441,7 @@ test('bounded trainer results retain width across compact state and reflow profi
     for _,width in ipairs({280,320}) do
         C.profile.width=width;C.compact=false;C.status='A route status';C:Refresh()
         local physical=U.frame:GetWidth()*U.frame:GetScale()
-        assert(U.frame:GetHeight()*U.frame:GetScale()<=720 and U.rows[3].detail:GetHeight()==66)
+        assert(U.frame:GetHeight()*U.frame:GetScale()<=720 and U.rows[3].detail:GetHeight()>=20)
         assert(U.header:GetWidth()<U.settings.point[2] and U.settings:GetFrameLevel()>U.header:GetFrameLevel())
         assert(U.from:GetWidth()==width-102 and U.body:GetWidth()==width-28 and U.filterButton.point[2]==width-36)
         assert(U.fold:IsShown() and U.fold.point[2]+U.fold:GetWidth()<U.go.point[2])
@@ -427,7 +449,6 @@ test('bounded trainer results retain width across compact state and reflow profi
         C.compact=true;C:Refresh();assert(U.frame:GetWidth()*U.frame:GetScale()==physical)
         U.expand.scripts.OnClick();assert(U.frame:GetWidth()*U.frame:GetScale()==physical and U.fold:IsShown())
     end
-    for i,row in ipairs(U.rows) do row.detail.GetStringHeight=measurements[i] end
     UIParent:SetSize(1920,1080);C.profile.width=previous.width;C.profile.scale=previous.scale;C.filter=previous.filter;C:Stop()
 end)
 
@@ -436,7 +457,7 @@ test('open options follows display changes and closes pending confirmation and f
     assert(O.optionsTab.activeLine:IsShown() and not O.profilesTab.activeLine:IsShown() and O.appearance:IsShown())
     O.profilesTab.scripts.OnClick()
     assert(not O.optionsTab.activeLine:IsShown() and O.profilesTab.activeLine:IsShown() and O.profilePage:IsShown())
-    assert(O.profilesTab.activeLine.color[1]==C.profile.colors.accent[1])
+    assert(O.profilesTab.activeLine.color[1]==1 and O.profilesTab.activeLine.color[2]==.82)
     O.name:SetFocus();O.confirm='reset'
     UIParent:SetSize(600,400);O.frame.scripts.OnEvent(O.frame,'DISPLAY_SIZE_CHANGED')
     assert(O.frame:GetWidth()*O.frame:GetScale()<=600 and O.frame:GetHeight()*O.frame:GetScale()<=400)
@@ -566,5 +587,94 @@ test('typed intent planning keeps semantic candidates ahead of closer incidental
     C:Choose(incidental);C:Plan();assert(C.results[1].destination==incidental)
     C.destination=nil;C.query='';C:Plan();assert(#C.results==0 and C.status:find('Choose'))
     C:Stop();C.destinations=saved.destinations;C.data=saved.data;C.query=''
+end)
+test('edge selection and unlocked dragging tuck on the correct side without changing navigation',function()
+    C:Stop();C:ShowPanel(true);local saved=N.Model.Copy(C.profile);local state=C.nav;local O=N.Options
+    local actions={};local root={SetScrollMode=function() end,CreateRadio=function(_,label,selected,choose)
+        actions[label]=choose;return {AddInitializer=function() end}
+    end}
+    O.placement.menu(nil,root);actions['Right screen edge']()
+    assert(C.profile.dock=='right' and C.tucked and U.handle:IsShown() and not U.frame:IsShown() and C.nav==state)
+    assert(U.handle.point[1]=='RIGHT');U.handle.scripts.OnClick();assert(not C.tucked and U.frame:IsShown())
+    C.profile.locked=true;local x,y=C.profile.x,C.profile.y
+    U.header.scripts.OnDragStart();U.header.scripts.OnDragStop()
+    assert(not C.tucked and C.profile.dock=='right' and C.profile.x==x and C.profile.y==y,'locked drag is inert')
+    local oldLeft=U.frame.GetLeft;C.profile.locked=false
+    for _,side in ipairs({'left','right','none'}) do
+        U.frame.GetLeft=function() return side=='left' and 8 or side=='right' and UIParent:GetWidth()/U.frame:GetScale()-C.profile.width-8 or 200 end
+        U.header.scripts.OnDragStart();U.header.scripts.OnDragStop()
+        assert(C.profile.dock==side and C.tucked==(side~='none') and C.nav==state)
+    end
+    U.frame.GetLeft=oldLeft
+    for _,key in ipairs({'dock','x','y','locked'}) do C.profile[key]=saved[key] end
+    C:ShowPanel(true);C:ApplyProfile()
+end)
+
+test('options use XPIsland controls and font sizing preserves fixed dialog typography',function()
+    local O=N.Options;local size,scale=C.profile.fontSize,C.profile.scale
+    assert(O.close.template=='UIPanelCloseButton' and O.fontSize.template=='InputBoxTemplate' and O.scale.template=='UISliderTemplate')
+    assert(O.font.template=='WowStyle1DropdownTemplate' and O.font:GetHeight()==24 and O.optionsTab:GetHeight()==22)
+    O.fontSize:SetText('18');O.fontSize.scripts.OnEnterPressed(O.fontSize)
+    assert(C.profile.fontSize==18 and U.rows[1].name.fontSize==18 and O.font.Text.fontSize==12 and U.menuSave.text.fontSize==12)
+    assert(U.menuSave.text:GetUnboundedStringWidth()<=U.menuSave.text:GetWidth())
+    O.scale:SetValue(125);assert(C.profile.scale==1.25 and O.scaleEdit:GetText()=='125')
+    O.scaleEdit:SetText('not a number');O.scaleEdit.scripts.OnEnterPressed(O.scaleEdit);assert(C.profile.scale==1.25)
+    O.fontSize:SetText('99');O.fontSize.scripts.OnEnterPressed(O.fontSize);assert(C.profile.fontSize==18)
+    local sanitized=N.Settings.Load({fontSize=0/0});assert(sanitized.fontSize==13)
+    C.profile.fontSize=size;C.profile.scale=scale;C:ApplyProfile()
+end)
+
+test('long names and flight descriptions grow and scroll without shrinking the island',function()
+    C:Stop();local width,size,scale=C.profile.width,C.profile.fontSize,C.profile.scale
+    C.profile.width=280;C.profile.fontSize=18;C.profile.scale=1.6;C:ApplyProfile();UIParent:SetSize(1280,720)
+    local p=A.Position();local goal=N.Model.Copy(p);goal.x=p.x+500;goal.id='long';goal.name=string.rep('Long destination ',10)
+    local route=N.Routes.Summary({{mode='walk',start=p,finish=goal,distance=500,quality='bearing'}},goal,C:Context())
+    C.results={route,route,route};C.matches=nil;C.destination=goal;C.status=nil;C.compact=false;C:Refresh()
+    local row=U.rows[1];assert(row.name:GetText()==goal.name and row.name:GetHeight()>40 and row.name.wordWrap and row.name.nonSpaceWrap)
+    assert(-row.detail.point[3]>=6+row.name:GetHeight() and row:GetHeight()>-row.detail.point[3]+row.detail:GetHeight())
+    assert(U.bodyScrollRange>0 and U.frame:GetHeight()*U.frame:GetScale()<=720)
+    U.body.scripts.OnMouseWheel(nil,-1);assert(U.bodyScroll:GetVerticalScroll()>0)
+    local physical=U.frame:GetWidth()*U.frame:GetScale();C.nav.route=route;C.nav.leg=1;C.nav.state='walking';C.compact=true;C:Refresh()
+    assert(U.frame:GetWidth()*U.frame:GetScale()==physical and U.next:GetText()==goal.name and U.next:GetHeight()>40)
+    assert(not U.scrollRail:IsShown() and not U.scrollThumb:IsShown(),'overflow cue hides with result viewport')
+    C.compact=false;C:Refresh();assert(U.frame:GetWidth()*U.frame:GetScale()==physical)
+    UIParent:SetSize(1280,540);C.events.scripts.OnEvent(nil,'DISPLAY_SIZE_CHANGED')
+    assert(U.frame:GetHeight()*U.frame:GetScale()<=540 and U.scrollRail:IsShown())
+    C.nav.route=nil;goal.category='place';C.matches={goal,goal,goal};C.highlight=1;C:Refresh();C.highlight=3;C:Refresh()
+    assert(U.bodyScroll:GetVerticalScroll()>0 and U.bodyScroll:GetVerticalScroll()<=U.rows[3].bodyOffset)
+    UIParent:SetSize(1920,1080);C.profile.width=width;C.profile.fontSize=size;C.profile.scale=scale;C:Stop();C:ApplyProfile()
+end)
+
+test('empty state message and route action stay centered with hidden route controls',function()
+    C:Stop();C.destination=nil;C.status=nil;C.matches={};C.searching=true;C.results={};C:Refresh()
+    assert(U.note.justifyH=='CENTER' and U.go.text.justifyH=='CENTER')
+    assert(U.go.point[2]+U.go:GetWidth()/2==C.profile.width/2 and not U.stop:IsShown() and not U.fold:IsShown())
+    C.matches=nil;C.searching=false;C:Stop()
+end)
+
+test('compact route controls pause resume and clear stale arrival dwell',function()
+    local facing=GetPlayerFacing;GetPlayerFacing=function() return 0 end
+    C:Stop();local p=A.Position();local goal=N.Model.Copy(p);goal.x=p.x+1000;goal.id='compact';goal.name='Kelv Sternhammer'
+    local route=N.Routes.Summary({{mode='walk',start=p,finish=goal,distance=1000,quality='bearing'}},goal,C:Context())
+    C.results={route};C.selected=1;C.origin=nil;C.matches=nil;C.destination=goal;C:Go()
+    assert(C.compact and U.frame:GetHeight()<160 and U.pause.iconKind=='pause' and U.stop.iconKind=='close')
+    assert(U.stop.normalColor[1]>U.stop.normalColor[2]*3)
+    C.nav.dwell=1;C.nav.previous=p;C.nav.previousTime=1;U.pause.scripts.OnClick()
+    assert(C.manualPause and U.pause.iconKind=='play' and not C.nav.dwell and not C.nav.previous)
+    U.pause.scripts.OnClick();assert(not C.manualPause and U.pause.iconKind=='pause')
+    U.stop.scripts.OnClick();assert(not C.nav.route and not U.stop:IsShown());GetPlayerFacing=facing
+end)
+
+test('late media registration refits options and custom text color leaves native menus legible',function()
+    local O=N.Options;local original=LibStub;local callbacks={};local available=false
+    local lib={IsValid=function() return available end,Fetch=function() return 'late-wide.ttf' end,List=function() return {'Expressway'} end,
+        RegisterCallback=function(_,event,fn) callbacks[event]=fn end}
+    local width=O.font.Text.GetUnboundedStringWidth;O.font.Text.GetUnboundedStringWidth=function() return available and 600 or 60 end
+    local color=N.Model.Copy(C.profile.colors.text);C.profile.colors.text={.2,.3,.4};C:ApplyProfile()
+    assert(U.menuFont.textColor[1]==.93 and O.font.Text.textColor[1]~=.2)
+    LibStub=function() return lib end;U:WatchFonts();available=true;callbacks.LibSharedMedia_Registered(nil,'font')
+    assert(O.font.Text:GetScale()<.5 and O.font.Text.font=='late-wide.ttf')
+    assert(U.eagle.color[1]==.88 and U.eagle.color[2]==.66 and U.settings.iconKind=='cog')
+    O.font.Text.GetUnboundedStringWidth=width;LibStub=original;C.profile.colors.text=color;C:ApplyProfile()
 end)
 print('PASS runtime scenarios: '..count..'; frames allocated='..#frames)

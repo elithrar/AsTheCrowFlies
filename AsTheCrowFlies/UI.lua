@@ -2,6 +2,7 @@ local _,N=...;local M=N.Model;local U={texts={}};N.UI=U
 local MEDIA="Interface\\AddOns\\AsTheCrowFlies\\Media\\"
 local accent={.78,.85,.61};local ink={.93,.94,.97}
 function U:Font(object,size)
+    local baseSize=size;size=object.atcfFixedFont and size or math.max(9,size+((self.owner and self.owner.profile.fontSize) or 13)-13)
     local path=STANDARD_TEXT_FONT or "Fonts\\FRIZQT__.TTF"
     local pref=self.owner and self.owner.profile.font or "Expressway"
     local lsm=LibStub and LibStub("LibSharedMedia-3.0",true)
@@ -13,7 +14,7 @@ function U:Font(object,size)
     if not valid or loaded==false or type(actual)~="string" or actual:gsub("/","\\"):lower()~=path:gsub("/","\\"):lower() then path=STANDARD_TEXT_FONT or "Fonts\\FRIZQT__.TTF" end
     local ok,result=pcall(object.SetFont,object,path,size,"")
     if not ok or result==false then object:SetFontObject(GameFontNormal) end
-    self.fontObjects=self.fontObjects or {};if not self.fontObjects[object] then self.texts[#self.texts+1]={object,size};self.fontObjects[object]=true end;return object
+    self.fontObjects=self.fontObjects or {};if not self.fontObjects[object] then self.texts[#self.texts+1]={object,baseSize};self.fontObjects[object]=true end;return object
 end
 function U:RefreshFonts()
     for _,v in ipairs(self.texts) do self:Font(v[1],v[2]) end
@@ -23,7 +24,7 @@ function U:WatchFonts()
     local lsm=LibStub and LibStub("LibSharedMedia-3.0",true)
     if not lsm or self.fontLibrary==lsm or not lsm.RegisterCallback then return end
     self.fontLibrary=lsm
-    local changed=function(_,kind) if kind=="font" then self:RefreshFonts();self:Refresh(self.owner) end end
+    local changed=function(_,kind) if kind=="font" then self:RefreshFonts();self:Refresh(self.owner);if N.Options.frame then N.Options:Refresh() end end end
     lsm.RegisterCallback(self,"LibSharedMedia_Registered",changed);lsm.RegisterCallback(self,"LibSharedMedia_SetGlobal",changed)
     self:RefreshFonts()
 end
@@ -55,24 +56,67 @@ function U:ApplyAppearance()
     local colors=self.owner.profile.colors
     if not colors then return end
     for _,surface in ipairs(self.backgrounds or {}) do surface:SetVertexColor(colors.background[1],colors.background[2],colors.background[3],.97) end
-    for _,entry in ipairs(self.texts) do entry[1]:SetTextColor(unpack(colors.text)) end
+    for _,entry in ipairs(self.texts) do if not entry[1].atcfOptions then entry[1]:SetTextColor(unpack(colors.text)) end end
     for _,row in ipairs(self.rows or {}) do row.lockedText:SetTextColor(.95,.25,.25) end
-    for _,t in ipairs({self.eagle,self.arrow}) do if t then t:SetVertexColor(unpack(colors.accent)) end end
+    if self.eagle then self.eagle:SetVertexColor(.88,.66,.16) end
+    if self.arrow then self.arrow:SetVertexColor(unpack(colors.accent)) end
 end
 function U:Button(parent,label,x,y,w,h,callback)
     local b=CreateFrame("Button",nil,parent);b:SetPoint("TOPLEFT",x,y);b:SetSize(w,h or 28)
     local inset=w<40 and 2 or 8
     b.bg=self:Surface(b,{.13,.14,.17,1});b.text=self:Text(b,label,12,inset,0,w-inset*2,h or 28);b.text:SetJustifyH("CENTER")
-    b:SetScript("OnClick",callback);b:SetScript("OnEnter",function() b.bg:SetVertexColor(.22,.24,.28,1) end);b:SetScript("OnLeave",function() b.bg:SetVertexColor(.13,.14,.17,1) end)
+    b.normalColor={.13,.14,.17,1};b.hoverColor={.22,.24,.28,1}
+    b:SetScript("OnClick",callback);b:SetScript("OnEnter",function() b.bg:SetVertexColor(unpack(b.hoverColor)) end);b:SetScript("OnLeave",function() b.bg:SetVertexColor(unpack(b.normalColor)) end)
     return b
 end
 function U:Tip(frame,text)
-    frame:SetScript("OnEnter",function() GameTooltip:SetOwner(frame,"ANCHOR_RIGHT");GameTooltip:SetText(text,nil,nil,nil,nil,true);GameTooltip:Show() end)
-    frame:SetScript("OnLeave",function() GameTooltip:Hide() end)
+    frame:SetScript("OnEnter",function() if frame.bg then frame.bg:SetVertexColor(unpack(frame.hoverColor)) end;GameTooltip:SetOwner(frame,"ANCHOR_RIGHT");GameTooltip:SetText(text,nil,nil,nil,nil,true);GameTooltip:Show() end)
+    frame:SetScript("OnLeave",function() if frame.bg then frame.bg:SetVertexColor(unpack(frame.normalColor)) end;GameTooltip:Hide() end)
+end
+function U:ButtonColor(b,normal,hover) b.normalColor=normal;b.hoverColor=hover;b.bg:SetVertexColor(unpack(normal)) end
+function U:Icon(b,kind)
+    b.text:Hide();b.icons=b.icons or {}
+    if not b.icons[kind] then
+        local icon=CreateFrame("Frame",nil,b);icon:SetSize(20,20);icon:SetPoint("CENTER");b.icons[kind]=icon
+        local function line(x1,y1,x2,y2,width)
+            local l=icon:CreateLine(nil,"ARTWORK");l:SetThickness(width or 2);l:SetColorTexture(.95,.96,.98,1)
+            l:SetStartPoint("CENTER",icon,x1,y1);l:SetEndPoint("CENTER",icon,x2,y2)
+        end
+        if kind=="cog" then
+            local points={};for i=0,31 do local a=i*math.pi/16;local r=(i%4==1 or i%4==2) and 8 or 6;points[i+1]={math.cos(a)*r,math.sin(a)*r} end
+            for i,p in ipairs(points) do local q=points[i%#points+1];line(p[1],p[2],q[1],q[2],1.5) end
+            for i=0,15 do local a,b=i*math.pi/8,(i+1)*math.pi/8;line(math.cos(a)*2.5,math.sin(a)*2.5,math.cos(b)*2.5,math.sin(b)*2.5,1.5) end
+        elseif kind=="pause" then line(-3,5,-3,-5,3);line(3,5,3,-5,3)
+        elseif kind=="play" then line(-4,6,5,0);line(5,0,-4,-6);line(-4,-6,-4,6)
+        elseif kind=="done" then line(-6,0,-2,-4);line(-2,-4,6,5)
+        else line(-4,4,4,-4);line(-4,-4,4,4) end
+    end
+    for name,icon in pairs(b.icons) do icon:SetShown(name==kind) end
+    b.iconKind=kind
+end
+function U:PauseIcon(c)
+    self:Icon(self.pause,c.nav.state=="nearby" and "done" or c.manualPause and "play" or "pause")
+    self:Tip(self.pause,c.nav.state=="nearby" and "Confirm arrival" or c.manualPause and "Resume navigation" or "Pause navigation")
+end
+function U:SetDock(c,side,tuck)
+    c.profile.dock=(side=="left" or side=="right") and side or "none";c.tucked=tuck and c.profile.dock~="none" or false;c.hidden=false
+    self:Layout(c)
+end
+function U:WrappedHeight(text,minimum)
+    text:SetHeight(0)
+    local scale=self.frame:GetEffectiveScale();local height=math.max(minimum or 0,math.ceil(text:GetStringHeight()*scale+4)/scale)
+    text:SetHeight(height);return height
+end
+function U:ScrollIndicator(offset)
+    local range=self.bodyScrollRange or 0;local visible=self.bodyScroll:GetHeight()
+    self.scrollRail:SetShown(range>0 and self.bodyScroll:IsShown());self.scrollThumb:SetShown(range>0 and self.bodyScroll:IsShown())
+    if range<=0 then return end
+    local height=math.max(12,visible*visible/(visible+range));self.scrollRail:SetHeight(visible);self.scrollThumb:SetHeight(height)
+    self.scrollThumb:ClearAllPoints();self.scrollThumb:SetPoint("TOPLEFT",self.scrollRail,"TOPLEFT",0,-math.min(range,math.max(0,offset or 0))/range*(visible-height))
 end
 function U:Menu(parent,x,y,w,label,entries,choose)
     local d=CreateFrame("DropdownButton",nil,parent,"WowStyle1DropdownTemplate");d:SetPoint("TOPLEFT",x,y);d:SetSize(w,28);d:SetDefaultText(label)
-    if not self.menuFont then self.menuFont=CreateFont("AsTheCrowFliesMenuFont");self:Font(self.menuFont,12) end
+    if not self.menuFont then self.menuFont=CreateFont("AsTheCrowFliesMenuFont");self.menuFont.atcfFixedFont=true;self.menuFont.atcfOptions=true;self:Font(self.menuFont,12);self.menuFont:SetTextColor(unpack(ink)) end
     if d.Text then self:Font(d.Text,12);d.Text:ClearAllPoints();d.Text:SetPoint("LEFT",d,"LEFT",9,0);d.Text:SetSize(w-36,28);d.Text:SetJustifyH("LEFT");d.Text:SetJustifyV("MIDDLE");d.Text:SetWordWrap(false) end
     d:SetupMenu(function(_,root)
         root:SetScrollMode(280)
@@ -93,7 +137,7 @@ function U:FilterMenu(parent,c)
         local line=d:CreateLine(nil,"ARTWORK");line:SetThickness(1.5)
         line:SetStartPoint("TOPLEFT",d,points[i][1],-points[i][2]);line:SetEndPoint("TOPLEFT",d,points[i+1][1],-points[i+1][2]);self.filterLines[#self.filterLines+1]=line
     end
-    if not self.menuFont then self.menuFont=CreateFont("AsTheCrowFliesMenuFont");self:Font(self.menuFont,12) end
+    if not self.menuFont then self.menuFont=CreateFont("AsTheCrowFliesMenuFont");self.menuFont.atcfFixedFont=true;self.menuFont.atcfOptions=true;self:Font(self.menuFont,12);self.menuFont:SetTextColor(unpack(ink)) end
     d:SetupMenu(function(_,root)
         root:SetScrollMode(280)
         local function checkbox(container,label,selected,group,key)
@@ -146,83 +190,100 @@ end
 function U:Create(c)
     self.owner=c;local f=CreateFrame("Frame","AsTheCrowFliesPanel",UIParent);self.frame=f
     f:SetMovable(true);f:EnableMouse(true);f:SetClampedToScreen(true);f:SetFrameStrata("MEDIUM");self:Surface(f)
-    local header=CreateFrame("Frame",nil,f);self.header=header;header:SetPoint("TOPLEFT");header:SetSize(c.profile.width-72,42);header:EnableMouse(true);header:RegisterForDrag("LeftButton")
-    header:SetScript("OnDragStart",function() if not c.profile.locked then f:StartMoving() end end)
+    local header=CreateFrame("Frame",nil,f);self.header=header;header:SetPoint("TOPLEFT");header:SetSize(c.profile.width-78,44);header:EnableMouse(true);header:RegisterForDrag("LeftButton")
+    header:SetScript("OnDragStart",function() if not c.profile.locked then self.dragging=true;f:StartMoving() end end)
     header:SetScript("OnDragStop",function()
+        if not self.dragging then return end;self.dragging=false
         f:StopMovingOrSizing()
         local left,top=f:GetLeft(),f:GetTop();local scale=f:GetScale();local screen=UIParent:GetWidth()/scale
         c.profile.x=left;c.profile.y=top-UIParent:GetHeight()/scale;c.profile.dock=left<24 and "left" or (left+c.profile.width>screen-24 and "right" or "none")
+        c.tucked=c.profile.dock~="none"
         self:Layout(c)
     end)
-    local eagle=header:CreateTexture(nil,"ARTWORK");self.eagle=eagle;eagle:SetTexture(MEDIA.."eagle.tga");eagle:SetPoint("TOPLEFT",14,-11);eagle:SetSize(24,24);eagle:SetVertexColor(unpack(accent))
-    self.title=self:Text(header,"AS THE CROW FLIES",11,46,-11,184,24)
-    self.settings=self:Button(f,"...",c.profile.width-62,-9,26,26,function() self.menu:SetShown(not self.menu:IsShown()) end)
+    local eagle=header:CreateTexture(nil,"ARTWORK");self.eagle=eagle;eagle:SetTexture(MEDIA.."eagle.tga");eagle:SetPoint("LEFT",header,"LEFT",14,0);eagle:SetSize(24,24);eagle:SetVertexColor(.88,.66,.16)
+    self.title=self:Text(header,"AS THE CROW FLIES",11,46,0,184,24);self.title:ClearAllPoints();self.title:SetPoint("LEFT",header,"LEFT",46,0)
+    self.title.atcfFixedFont=true;self:Font(self.title,11)
+    self.settings=self:Button(f,"...",c.profile.width-68,-9,26,26,function() self.menu:SetShown(not self.menu:IsShown()) end)
+    self:Icon(self.settings,"cog")
     self.settings:SetFrameLevel(header:GetFrameLevel()+3);self:Tip(self.settings,"Navigation menu")
-    self.tuck=self:Button(f,"<",c.profile.width-32,-9,24,26,function() c:Back() end)
+    self.tuck=self:Button(f,"<",c.profile.width-38,-9,24,26,function() c:Back() end)
     self.tuck:SetFrameLevel(header:GetFrameLevel()+3);self:Tip(self.tuck,"Back to the previous view")
     self.editor=CreateFrame("Frame",nil,f);self.editor:SetPoint("TOPLEFT",0,-45);self.editor:SetPoint("TOPRIGHT",0,-45);self.editor:SetHeight(76)
     self.from=self:Edit(self.editor,"From",0,true);self.to=self:Edit(self.editor,"To",-40,false)
     self.current=self:Button(self.editor,"@",c.profile.width-34,-2,22,28,function() c:Edit(true);c.origin=nil;self.from:SetText("Current location");c:Refresh() end)
     self:Tip(self.current,"Reset origin to your current location")
     self:FilterMenu(self.editor,c)
-    self.body=CreateFrame("Frame",nil,f);self.body:SetPoint("TOPLEFT",14,-125);self.body:SetWidth(c.profile.width-28)
+    self.bodyScroll=CreateFrame("ScrollFrame",nil,f);self.bodyScroll:SetPoint("TOPLEFT",14,-125);self.bodyScroll:SetWidth(c.profile.width-28)
+    self.body=CreateFrame("Frame",nil,self.bodyScroll);self.body:SetPoint("TOPLEFT");self.body:SetWidth(c.profile.width-28);self.bodyScroll:SetScrollChild(self.body)
+    self.scrollRail=f:CreateTexture(nil,"ARTWORK");self.scrollRail:SetPoint("TOPLEFT",self.bodyScroll,"TOPRIGHT",4,0);self.scrollRail:SetWidth(2);self.scrollRail:SetColorTexture(.2,.21,.24,1);self.scrollRail:Hide()
+    self.scrollThumb=f:CreateTexture(nil,"OVERLAY");self.scrollThumb:SetWidth(2);self.scrollThumb:SetColorTexture(.7,.7,.72,1);self.scrollThumb:Hide()
+    self.bodyScroll:SetScript("OnVerticalScroll",function(_,offset) self:ScrollIndicator(offset) end)
     self.rows={}
     for i=1,3 do
         local b=self:Button(self.body,"",0,-(i-1)*83,c.profile.width-28,77,function()
             if c.matches then local index=(c.matchOffset or 0)+i;c:Choose(c.matches[index],c.searchOrigin)
             else c.selected=i;c:Refresh() end
         end)
-        b.text:Hide();b.name=self:Text(b,"",13,10,-6,c.profile.width-50,21)
-        b.detail=self:Text(b,"",11,10,-27,c.profile.width-50,41);b.detail:SetWordWrap(true)
+        b.text:Hide();b.name=self:Text(b,"",13,10,-6,c.profile.width-50,21);b.name:SetWordWrap(true);b.name:SetNonSpaceWrap(true);b.name:SetJustifyV("TOP")
+        b.detail=self:Text(b,"",11,10,-27,c.profile.width-50,41);b.detail:SetWordWrap(true);b.detail:SetNonSpaceWrap(true);b.detail:SetJustifyV("TOP")
         b.go=self:Button(b,"Go",c.profile.width-80,-23,44,30,function()
             if not c.matches and c.results[i] and not c.results[i].unavailable then c.selected=i;c:Go() end
         end);b.go:Hide()
+        self:ButtonColor(b.go,{.29,.34,.21,1},{.40,.46,.28,1})
         b.locked=CreateFrame("Frame",nil,b);b.locked:SetAllPoints(b);b.locked:SetFrameLevel(b:GetFrameLevel()+4)
         local shade=b.locked:CreateTexture(nil,"BACKGROUND");shade:SetAllPoints();shade:SetColorTexture(0,0,0,.68)
         b.lockedText=self:Text(b.locked,"Undiscovered flight points",11,6,0,c.profile.width-40,22);b.lockedText:ClearAllPoints();b.lockedText:SetPoint("CENTER");b.lockedText:SetTextColor(.95,.25,.25)
         b.locked:Hide()
         self.rows[i]=b
     end
-    self.body:EnableMouseWheel(true);self.body:SetScript("OnMouseWheel",function(_,delta)
+    local function scroll(_,delta)
+        local old=self.bodyScroll:GetVerticalScroll();local range=self.bodyScrollRange or 0
+        local next=math.max(0,math.min(range,old-delta*40))
+        if next~=old then self.bodyScroll:SetVerticalScroll(next);return end
         if c.matches then c.highlight=math.max(1,math.min(#c.matches,(c.highlight or 1)-delta));c:Refresh() end
-    end)
-    self.note=self:Text(f,"",11,14,-200,c.profile.width-28,44);self.note:SetWordWrap(true);self.note:SetTextColor(.68,.71,.76)
+    end
+    self.body:EnableMouseWheel(true);self.body:SetScript("OnMouseWheel",scroll);self.bodyScroll:EnableMouseWheel(true);self.bodyScroll:SetScript("OnMouseWheel",scroll)
+    self.note=self:Text(f,"",11,14,-200,c.profile.width-28,44);self.note:SetWordWrap(true);self.note:SetJustifyH("CENTER");self.note:SetTextColor(.68,.71,.76)
     self.go=self:Button(f,"Find routes",14,-246,c.profile.width-88,30,function() if not c.destination and M.HasFilter(c.filter) then c:Plan() else c:Enter() end end)
-    self.stop=self:Button(f,"Stop",c.profile.width-66,-246,52,30,function() c:Stop() end)
+    self.stop=self:Button(f,"",c.profile.width-42,-246,28,28,function() c:Stop() end);self:Icon(self.stop,"close");self:ButtonColor(self.stop,{.52,.12,.14,1},{.70,.18,.20,1});self:Tip(self.stop,"Stop navigation")
     self.guidance=CreateFrame("Frame",nil,f);self.guidance:SetPoint("TOPLEFT",14,-48);self.guidance:SetSize(c.profile.width-28,94)
     self.arrow=self.guidance:CreateTexture(nil,"ARTWORK");self.arrow:SetTexture(MEDIA.."arrow.tga");self.arrow:SetPoint("TOPLEFT",0,-4);self.arrow:SetSize(32,32);self.arrow:SetVertexColor(unpack(accent))
     self.next=self:Text(self.guidance,"",13,42,0,c.profile.width-70,25)
+    self.next:SetWordWrap(true);self.next:SetNonSpaceWrap(true);self.next:SetJustifyV("TOP")
     self.remaining=self:Text(self.guidance,"",11,42,-25,c.profile.width-70,20)
+    self.remaining:SetWordWrap(true);self.remaining:SetJustifyV("TOP")
     self.directionNote=self:Text(self.guidance,"",11,0,-51,c.profile.width-28,38);self.directionNote:SetWordWrap(true)
     self.expand=self:Button(f,"Edit / routes",14,-147,c.profile.width-154,28,function() c.compact=false;c:Refresh() end)
-    self.pause=self:Button(f,"Pause",c.profile.width-132,-147,60,28,function()
+    self.pause=self:Button(f,"",c.profile.width-76,-147,28,28,function()
         if c.nav.state=="nearby" then c.nav.state="arrived";c.nav.message="Arrival confirmed";c.character.intent=nil
-        else c.manualPause=not c.manualPause;c.nav.measure=nil end;c:Refresh()
+        else c.manualPause=not c.manualPause;c.nav.measure=nil;c.nav.dwell=nil;c.nav.previous=nil;c.nav.previousTime=nil end;c:Refresh()
     end)
+    self:PauseIcon(c)
     self.fold=self:Button(f,"Fold",14,-125,50,30,function() c.compact=true;c:Refresh() end)
     local handle=CreateFrame("Button",nil,UIParent);self.handle=handle;handle:SetSize(24,64);handle:SetFrameStrata("MEDIUM");self:Surface(handle)
     handle.text=self:Text(handle,">",16,0,0,24,64);handle.text:SetJustifyH("CENTER");handle:SetScript("OnClick",function() c.tucked=false;self:Layout(c) end)
     self.from:SetText("Current location");self:Layout(c)
     local menu=CreateFrame("Frame","AsTheCrowFliesMenu",f);self.menu=menu;menu:SetPoint("TOPRIGHT",f,"TOPRIGHT",-8,-40);menu:SetSize(196,172);menu:SetFrameStrata("DIALOG");menu:SetFrameLevel(f:GetFrameLevel()+20);menu:EnableMouse(true);self:Surface(menu)
-    local function action(label,y,fn) return self:Button(menu,label,8,y,180,26,function() menu:Hide();fn() end) end
+    local function action(label,y,fn)
+        local b=self:Button(menu,label,8,y,180,26,function() menu:Hide();fn() end);b.text.atcfFixedFont=true;self:Font(b.text,12);return b
+    end
     self.menuOptions=action("Settings",-8,function() N.Options:Open() end)
     self.menuSave=action("Save current location",-40,function() SlashCmdList.ASTHECROWFLIES("remember") end)
     self.menuLock=action("Lock / unlock panel",-72,function() c.profile.locked=not c.profile.locked;c:Refresh() end)
-    self.menuTuck=action("Tuck to screen edge",-104,function() c.tucked=true;self:Layout(c) end)
+    self.menuTuck=action("Tuck to screen edge",-104,function() self:SetDock(c,c.profile.dock=="none" and "right" or c.profile.dock,true) end)
     self.menuClose=action("Close menu",-136,function() end);menu:Hide()
     UISpecialFrames=UISpecialFrames or {};table.insert(UISpecialFrames,"AsTheCrowFliesMenu")
 end
 function U:Layout(c)
-    -- Reserve the same bounded expanded footprint in every state.
     local f,p=self.frame,c.profile;local scale=math.min(p.scale,UIParent:GetHeight()/660,UIParent:GetWidth()/(p.width+16));f:SetScale(scale);f:SetWidth(p.width);f:ClearAllPoints()
     local function move(control,x,y) control:ClearAllPoints();control:SetPoint("TOPLEFT",x,y) end
-    self.header:SetWidth(p.width-72);self.title:SetWidth(p.width-118)
-    move(self.settings,p.width-62,-9);move(self.tuck,p.width-32,-9);move(self.current,p.width-34,-2)
-    self.from:SetWidth(p.width-102);self.to:SetWidth(p.width-102);self.body:SetWidth(p.width-28)
+    self.header:SetWidth(p.width-78);self.title:SetWidth(p.width-124)
+    move(self.settings,p.width-68,-9);move(self.tuck,p.width-38,-9);move(self.current,p.width-34,-2)
+    self.from:SetWidth(p.width-102);self.to:SetWidth(p.width-102);self.body:SetWidth(p.width-28);self.bodyScroll:SetWidth(p.width-28)
     move(self.filterButton,p.width-36,-42);self.note:SetWidth(p.width-28)
-    local goWidth=p.width-(c.nav.route and 148 or 88);self.go:SetWidth(goWidth);self.go.text:SetWidth(goWidth-16)
+    local goWidth=p.width-(c.nav.route and 124 or 88);self.go:SetWidth(goWidth);self.go.text:SetWidth(goWidth-16)
     self.guidance:SetWidth(p.width-28);self.next:SetWidth(p.width-70);self.remaining:SetWidth(p.width-70);self.directionNote:SetWidth(p.width-28)
-    self.expand:SetWidth(p.width-154);self.expand.text:SetWidth(p.width-170);move(self.pause,p.width-132,-147)
+    self.expand:SetWidth(p.width-96);self.expand.text:SetWidth(p.width-112)
     for _,row in ipairs(self.rows) do row:SetWidth(p.width-28);row.lockedText:SetWidth(p.width-40) end
     local sw,sh=UIParent:GetWidth()/scale,UIParent:GetHeight()/scale
     local x=p.dock=="right" and sw-p.width-8 or p.dock=="left" and 8 or p.x
@@ -232,18 +293,34 @@ function U:Layout(c)
     self.handle:SetPoint(p.dock=="right" and "RIGHT" or "LEFT",UIParent,p.dock=="right" and "RIGHT" or "LEFT",0,0)
     self.handle.text:SetText(p.dock=="right" and "<" or ">");self.handle:SetShown(not c.hidden and c.tucked==true);f:SetShown(not c.hidden and not c.tucked)
 end
+function U:LayoutGuidance(c)
+    self.next:SetWidth(c.profile.width-70);self.remaining:SetWidth(c.profile.width-70);self.directionNote:SetWidth(c.profile.width-28)
+    local nameHeight=self:WrappedHeight(self.next,21)
+    self.remaining:ClearAllPoints();self.remaining:SetPoint("TOPLEFT",42,-nameHeight-3)
+    local body=math.max(40,nameHeight+3+self:WrappedHeight(self.remaining,18))
+    local message=self.directionNote:GetText() or "";self.directionNote:SetShown(message~="")
+    self.directionNote:ClearAllPoints();self.directionNote:SetPoint("TOPLEFT",0,-body-6)
+    if message~="" then body=body+6+self:WrappedHeight(self.directionNote,16) end
+    self.guidance:SetHeight(body)
+    local footer=48+body+10
+    for _,entry in ipairs({{self.expand,14},{self.pause,c.profile.width-76},{self.stop,c.profile.width-42}}) do
+        entry[1]:ClearAllPoints();entry[1]:SetPoint("TOPLEFT",entry[2],-footer)
+    end
+    local height=footer+40;local changed=self.frame:GetHeight()~=height;self.frame:SetHeight(height);return changed
+end
 function U:Refresh(c)
     if self.menuLock then self.menuLock.text:SetText(c.profile.locked and "Unlock panel" or "Lock panel") end
     local compact=c.compact and c.nav.route~=nil
     local expanded=c.searching or c.matches~=nil or c.destination~=nil or #c.results>0 or c.nav.route~=nil or c.planned
-    self.editor:SetShown(not compact);self.body:SetShown(not compact and expanded);self.guidance:SetShown(compact);self.expand:SetShown(compact);self.go:SetShown(not compact and expanded and (c.matches~=nil or #c.results==0));self.note:SetShown(not compact and expanded)
+    self.editor:SetShown(not compact);self.body:SetShown(not compact and expanded);self.bodyScroll:SetShown(not compact and expanded);self.guidance:SetShown(compact);self.expand:SetShown(compact);self.go:SetShown(not compact and expanded and (c.matches~=nil or #c.results==0));self.note:SetShown(not compact and expanded)
+    self:ScrollIndicator(self.bodyScroll:GetVerticalScroll())
     self.stop:SetShown(c.nav.route~=nil);self.fold:SetShown(not compact and c.nav.route~=nil)
     local tint=M.HasFilter(c.filter) and c.profile.colors.accent or {.65,.68,.73}
     for _,line in ipairs(self.filterLines) do line:SetColorTexture(tint[1],tint[2],tint[3],1) end
-    self.pause:SetShown(compact);self.pause.text:SetText(c.nav.state=="nearby" and "Done" or c.manualPause and "Resume" or "Pause")
+    self.pause:SetShown(compact);self:PauseIcon(c)
     if not self.from:HasFocus() then self.from:SetText(c.origin and c.origin.name or "Current location") end
     if not self.to:HasFocus() then self.to:SetText(c.destination and c.destination.name or c.query or "") end
-    if compact then self.frame:SetHeight(188);self.stop:ClearAllPoints();self.stop:SetPoint("TOPLEFT",c.profile.width-66,-147)
+    if compact then self:Guidance(c,N.Adapter.Position(),c:Context(),GetTime());self:LayoutGuidance(c)
     else
         local count=math.min(3,c.matches and #c.matches or #c.results);local offset=math.max(0,(c.highlight or 1)-3);c.matchOffset=offset;local bodyHeight=0
         for i,b in ipairs(self.rows) do
@@ -263,10 +340,12 @@ function U:Refresh(c)
                     b.name:SetText(item.destination.name)
                     b.detail:SetText(M.RouteLegs(item,c.ctx.speed))
                 end
-                local detailHeight=math.min(66,math.max(20,b.detail:GetStringHeight()));local rowHeight=math.max(62,detailHeight+38)
-                b.detail:SetHeight(detailHeight);b:SetHeight(rowHeight);b:ClearAllPoints();b:SetPoint("TOPLEFT",0,-bodyHeight)
+                local nameHeight=self:WrappedHeight(b.name,21)
+                b.detail:ClearAllPoints();b.detail:SetPoint("TOPLEFT",10,-6-nameHeight-3)
+                local detailHeight=self:WrappedHeight(b.detail,20);local rowHeight=math.max(62,6+nameHeight+3+detailHeight+10)
+                b:SetHeight(rowHeight);b:ClearAllPoints();b:SetPoint("TOPLEFT",0,-bodyHeight);b.bodyOffset=bodyHeight
                 b.go:ClearAllPoints();b.go:SetPoint("RIGHT",b,"RIGHT",-8,0);bodyHeight=bodyHeight+rowHeight+6
-                b.bg:SetVertexColor(unpack((c.matches and offset+i==c.highlight or not c.matches and i==c.selected) and {.22,.27,.18,1} or {.10,.11,.14,1}))
+                b.normalColor=(c.matches and offset+i==c.highlight or not c.matches and i==c.selected) and {.22,.27,.18,1} or {.10,.11,.14,1};b.bg:SetVertexColor(unpack(b.normalColor))
                 local tip
                 if c.matches then
                     tip=item.name.."\n"..(item.source or "Flight point")
@@ -284,7 +363,7 @@ function U:Refresh(c)
                 self:Tip(b,tip)
             end
         end
-        local y=125+bodyHeight;self.body:SetHeight(math.max(1,bodyHeight));self.note:ClearAllPoints();self.note:SetPoint("TOPLEFT",14,-y)
+        self.body:SetHeight(math.max(1,bodyHeight))
         local message=expanded and c.status or nil
         if not message and c.matches and #c.matches==0 then
             local categories=c.filter.categories or {};local npcSearch=c.searchOrigin or not M.HasFilter(c.filter)
@@ -296,10 +375,27 @@ function U:Refresh(c)
             else message="No matching destinations. Try another name or category." end
         end
         self.note:SetText(message or "");self.note:SetShown(message~=nil)
-        local footer=y+(message and 44 or 0)
-        self.go:ClearAllPoints();self.go:SetPoint("TOPLEFT",c.nav.route and 74 or 14,-footer);self.stop:ClearAllPoints();self.stop:SetPoint("TOPLEFT",c.profile.width-66,-footer)
-        self.fold:ClearAllPoints();self.fold:SetPoint("TOPLEFT",14,-footer)
+        local messageHeight=message and (self:WrappedHeight(self.note,32)+10) or 0
         local hasFooter=self.go:IsShown() or self.stop:IsShown() or self.fold:IsShown()
+        local scale=math.min(c.profile.scale,UIParent:GetHeight()/660,UIParent:GetWidth()/(c.profile.width+16))
+        local limit=(UIParent:GetHeight()-16)/scale-125-messageHeight-(hasFooter and 42 or 8)
+        local visible=math.max(0,math.min(bodyHeight,math.max(60,limit)))
+        self.bodyScroll:SetHeight(math.max(1,visible));self.bodyScrollRange=math.max(0,bodyHeight-visible)
+        local key=c.matches or c.results;local selected=c.matches and (c.highlight or 1)-offset or (c.selected or 1)
+        local scroll=self.scrollResults~=key and 0 or self.bodyScroll:GetVerticalScroll()
+        if self.scrollResults~=key or self.scrollHighlight~=(c.matches and c.highlight or c.selected) then
+            local row=self.rows[selected]
+            if row and row:IsShown() then
+                if row:GetHeight()>=visible or row.bodyOffset<scroll then scroll=row.bodyOffset
+                elseif row.bodyOffset+row:GetHeight()>scroll+visible then scroll=row.bodyOffset+row:GetHeight()-visible end
+            end
+        end
+        self.scrollResults=key;self.scrollHighlight=c.matches and c.highlight or c.selected
+        self.bodyScroll:SetVerticalScroll(math.max(0,math.min(scroll,self.bodyScrollRange)));self:ScrollIndicator(self.bodyScroll:GetVerticalScroll())
+        local y=125+visible;self.note:ClearAllPoints();self.note:SetPoint("TOPLEFT",14,-y)
+        local footer=y+messageHeight
+        self.go:ClearAllPoints();self.go:SetPoint("TOPLEFT",c.nav.route and 74 or 44,-footer);self.stop:ClearAllPoints();self.stop:SetPoint("TOPLEFT",c.profile.width-42,-footer)
+        self.fold:ClearAllPoints();self.fold:SetPoint("TOPLEFT",14,-footer)
         self.go.text:SetText("Find routes");self.frame:SetHeight(expanded and (footer+(hasFooter and 42 or 8)) or 129)
     end
     self:Layout(c)
@@ -311,10 +407,11 @@ function U:Guidance(c,p,ctx,now)
     self.next:SetText(c.nav.state=="arrived" and "Arrived" or leg and leg.mode=="flight" and ("Fly to "..(leg.finish.name or "flight point")) or target and target.name or c.nav.route.destination.name)
     self.remaining:SetText((c.nav.state=="paused" or c.nav.state=="unavailable" or c.manualPause) and "Estimate paused" or c.nav.state=="arrived" and "Journey complete" or "~"..M.Yards(distance).." • "..M.Time(seconds).."*")
     self.directionNote:SetText(c.manualPause and "Paused" or c.nav.message or "")
-    self.pause.text:SetText(c.nav.state=="nearby" and "Done" or c.manualPause and "Resume" or "Pause")
+    self:PauseIcon(c)
     local east,north=M.Vector(p,target,ctx.facing)
     self.arrow:SetShown(not c.manualPause and east~=nil and c.nav.state~="flying" and c.nav.state~="paused" and c.nav.state~="unavailable" and c.nav.state~="arrived")
     if east then self.arrow:SetRotation(-math.atan2(east,north));if not ctx.facing and not c.manualPause and not c.nav.message and c.nav.state~="arrived" then self.directionNote:SetText("Bearing from north") end end
+    if c.compact and self:LayoutGuidance(c) then self:Layout(c) end
 end
 function U:Toggle(c)
     if c.hidden then c.hidden=false;c.tucked=false elseif c.tucked then c.tucked=false elseif c.nav.route then c.compact=not c.compact else c.tucked=true end

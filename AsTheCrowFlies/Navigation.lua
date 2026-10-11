@@ -41,6 +41,10 @@ function V.Update(s,p,now,onTaxi,dead,offer)
             s.measure=nil;s.flightSeen=nil;s.leg=s.leg+1;s.state="walking";s.message=nil;s.previous=nil;return sample
         elseif not onTaxi then
             s.state="awaiting_flight";s.message=offer and "Select the shown flight in the taxi window" or "Open this flight master to check availability"
+        else
+            -- A temporary location pause clears its status on resume. Keep the
+            -- confirmed flight visible without restarting its invalidated timer.
+            s.message="In flight"
         end
         return
     end

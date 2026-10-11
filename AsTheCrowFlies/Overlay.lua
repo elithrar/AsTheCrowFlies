@@ -46,7 +46,8 @@ end
 function O:MapPin(field,canvas)
     if not self[field] then
         local f=CreateFrame("Frame",nil,canvas);f:SetSize(18,18);f:SetFrameLevel(canvas:GetFrameLevel()+20);f:EnableMouse(true)
-        local t=f:CreateTexture(nil,"OVERLAY");t:SetAllPoints();t:SetTexture("Interface\\AddOns\\AsTheCrowFlies\\Media\\"..(field=="map" and "arrow.tga" or "eagle.tga"));t:SetVertexColor(.78,.85,.61);self[field]=f
+        local t=f:CreateTexture(nil,"OVERLAY");t:SetAllPoints();t:SetTexture("Interface\\AddOns\\AsTheCrowFlies\\Media\\"..(field=="map" and "arrow.tga" or "eagle.tga"))
+        if field=="map" then t:SetVertexColor(.78,.85,.61) else t:SetVertexColor(.88,.66,.16) end;self[field]=f
         f:SetScript("OnEnter",function() GameTooltip:SetOwner(f,"ANCHOR_RIGHT");GameTooltip:SetText(f.caption or "Destination");GameTooltip:Show() end);f:SetScript("OnLeave",function() GameTooltip:Hide() end)
     end
     return self[field]

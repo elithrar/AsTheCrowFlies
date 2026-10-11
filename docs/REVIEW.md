@@ -79,3 +79,28 @@ Final validation: **81 Lua scenarios (39 model, 42 mocked runtime)**, five exact
 ## Screenshot-review follow-up
 
 The parent reports an independent cloud reviewer successfully materialized and inspected all eleven supplied screenshots against commit 69e2de7. This supersedes the earlier local screenshot-access blocker for that independent comparison; native in-game rendering remains unobserved here. Two source-backed findings were validated and fixed narrowly: Options/Profiles now show a two-pixel accent underline on the active tab, and results with no footer controls use eight pixels of bottom padding instead of reserving the 42-pixel control footer. Active navigation retains its Fold/Stop footer, and search retains Find routes. Existing runtime scenarios now check tab switching/reopening, accent color, results-only height and active-route layout. All 81 Lua scenarios pass; no new controls or shared Blizzard method overrides were introduced.
+
+
+## Screenshot feedback and installation iteration, 2026-10-10
+
+Compared the options implementation directly against the installed XPIsland dialog and the supplied in-game screenshots. The updated dialog uses its 620 x 462 dimensions, native dialog close button, thin bordered sections, gold headings/tabs, 12px option controls, 24px native dropdowns, 22px bordered buttons/input boxes, native scale slider and two-column gutters. Island font family, font size (10-18) and scale (50-160%) are separate controls; existing saved settings retain their values. Options typography stays fixed while island text changes size.
+
+| Feedback | Implemented behavior and check |
+| --- | --- |
+| Header alignment | Shared vertical center; right controls use the content margin. |
+| Settings icon | Font-independent cog drawn with native lines. |
+| Dock to either side | Explicit Left/Right selection or unlocked drag-to-edge hides to a matching edge tab; locked drag gestures leave placement and visibility unchanged. |
+| XPIsland options | Matching native control types, layout proportions, gold headings, borders, fonts and fixed control sizes; safe profile/color-picker lifecycle retained. |
+| Truncated names and routes | Unconstrained text measurement, wrapped destination and detail blocks, adaptive row height, bounded scroll viewport and overflow cue; keyboard selection reveals its row. |
+| Go contrast | Stronger green button fill with a separate hover color. |
+| Compact routing | Content-driven height without reserved blank status area; pause/play/arrival symbols and red X stop. |
+| Centered empty state | Centered message and Find routes action when no route controls are visible. |
+| Gold crow | Original side-profile crow mask with rounded crown, stout beak, folded wing, fan tail and feet; mustard gold in header and destination map marker. Checked at 24, 40 and 112 pixels. |
+
+Independent design and API review loops found and fixed late SharedMedia options fitting, locked drag-stop mutation, clipped large-font action-menu labels, native-menu color mismatch, the remaining green map crow, display-resize viewport recovery and offscreen keyboard selection. Result scrolling keeps the island's width/scale stable through compact/expanded transitions. A thin overflow cue hides with the results viewport.
+
+Independent route-finding review rechecked directed graph search, distance/time ordering, current-master offers, discovery gates, candidate shortlisting, flight recovery, landing/death/wrong-flight states and arrival. Fixed lost In flight status after missing-position recovery, keeping partial timing invalidated. Manual pause now clears arrival dwell and old movement history so resuming cannot complete a stale arrival timer. Re-review found no further actionable source-backed findings.
+
+Validation: 87 Lua 5.1 scenarios (39 model, 48 mocked runtime), including six new interaction regressions for these changes. Independent design and API reviewers reran the suite successfully. Native ScrollFrame, Slider, FontString and menu contracts were checked against client-source commit 943764493e6b16d63ded3ab304150d1f05e58b57, including [ScrollFrame APIs](https://github.com/Gethe/wow-ui-source/blob/943764493e6b16d63ded3ab304150d1f05e58b57/Interface/AddOns/Blizzard_APIDocumentationGenerated/SimpleScrollFrameAPIDocumentation.lua). No protected movement/taxi action or global Blizzard-font mutation was introduced.
+
+The completed review is source, supplied-screenshot and mocked-runtime validation. It does not claim native rendering, combat/skin interoperability, actual taxi journeys or ETA calibration were observed for this iteration. The exact local flight payload remains 349,728 bytes with SHA-256 e74250e6ed1ea8cf69e3869e161135bb1bbba195ba794f5e0ccd78fc30320db7; public source retains its development stub, while the private installation package includes the full verified payload.

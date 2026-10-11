@@ -248,7 +248,7 @@ frame:SetScript("OnEvent",function(_,event,arg)
             C.nav.measure=nil;C.nav.previous=nil
             local p=A.Position();if p then A.ObserveMap(p.uiMapID,C.character,C.data.nodes);C:Reindex();if #C.results>0 then C:Plan() end end
         elseif event=="PLAYER_LOGOUT" then if C.ticker then C.ticker:Cancel() end
-        elseif event=="UI_SCALE_CHANGED" or event=="DISPLAY_SIZE_CHANGED" then N.UI:Layout(C) end
+        elseif event=="UI_SCALE_CHANGED" or event=="DISPLAY_SIZE_CHANGED" then C:Refresh() end
     end
 end)
 SLASH_ASTHECROWFLIES1="/atcf"
