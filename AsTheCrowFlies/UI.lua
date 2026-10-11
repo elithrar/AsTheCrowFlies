@@ -68,6 +68,9 @@ function U:Font(object,baseSize)
         object.atcfFontKey=not state.native and (path..":"..size..":"..fontFlags) or nil
     end
     object.atcfFontPath,object.atcfFontHeight,object.atcfFontFlags=object:GetFont()
+    if object.atcfSoftShadow then
+        object:SetShadowColor(0,0,0,.35);object:SetShadowOffset(0,0)
+    end
     return object
 end
 function U:RefreshFonts()
@@ -126,6 +129,7 @@ function U:ApplyAppearance()
     for _,surface in ipairs(self.backgrounds or {}) do surface:SetVertexColor(colors.background[1],colors.background[2],colors.background[3],.97) end
     for _,entry in ipairs(self.texts) do if not entry[1].atcfOptions then entry[1]:SetTextColor(unpack(colors.text)) end end
     for _,row in ipairs(self.rows or {}) do row.name:SetTextColor(1,.82,0);row.lockedText:SetTextColor(.95,.25,.25) end
+    if self.destinationName then self.destinationName:SetTextColor(1,.82,0) end
     if self.next then self.next:SetTextColor(1,.82,0) end
     if self.eagle then self.eagle:SetVertexColor(.88,.66,.16) end
     if self.arrow then self.arrow:SetVertexColor(unpack(colors.accent)) end
@@ -162,6 +166,12 @@ function U:Icon(b,kind)
         elseif kind=="back" then
             line(5,6,5,-1,2.8);line(5,-1,3,-3,2.8);line(3,-3,-6,-3,2.8)
             line(-6,-3,-1,2,2.8);line(-6,-3,-1,-8,2.8)
+        elseif kind=="location" then
+            for i=0,11 do
+                local a,b=i*math.pi/6,(i+1)*math.pi/6
+                line(math.cos(a)*5,math.sin(a)*5,math.cos(b)*5,math.sin(b)*5,1.5)
+            end
+            line(-8,0,-3,0,1.5);line(3,0,8,0,1.5);line(0,-8,0,-3,1.5);line(0,3,0,8,1.5)
         elseif kind=="left" or kind=="right" then
             local sign=kind=="left" and 1 or -1
             for x=-5,5 do local height=(x+5)*.7;line(x*sign,-height,x*sign,height,1.5) end
@@ -183,7 +193,7 @@ function U:SetDock(c,side,tuck)
 end
 function U:WrappedHeight(text,minimum)
     text:SetHeight(0)
-    local scale=self.frame:GetEffectiveScale();local height=math.max(minimum or 0,math.ceil(text:GetStringHeight()*scale+4)/scale)
+    local scale=text:GetEffectiveScale();local height=math.max(minimum or 0,(math.ceil(text:GetStringHeight()*scale)+2)/scale)
     text:SetHeight(height);return height
 end
 function U:ListingDistance(distance,seconds)
@@ -195,6 +205,24 @@ function U:ListingDistance(distance,seconds)
         time=" (est. "..(seconds<60 and "<1 minute" or minutes..(minutes==1 and " minute" or " minutes"))..")"
     end
     return "Distance: ~"..yards.." yards"..time
+end
+function U:RouteTotal(route)
+    local distance=route.distance
+    local yards=M.Number(distance) and (distance>=1000 and string.format("%.1fk",distance/1000) or string.format("%.0f",distance))
+    return (M.Number(route.eta) and "Est. "..M.Minutes(route.eta) or "Time unavailable")..(yards and " • ~"..yards.." yards" or " • Distance unavailable")
+end
+function U:DestinationDetail(destination)
+    local categories={class="Class trainer",profession="Profession trainer",trainer="Trainer",auction="Auction house",quest="Quest NPC",flight="Flight point",place="Saved place"}
+    return (destination.role or categories[destination.category] or "Destination")..(destination.zone and destination.zone~="" and (" • "..destination.zone) or "")
+end
+function U:SharedDestination(results)
+    local first=results[1] and results[1].destination
+    if not first then return end
+    for _,route in ipairs(results) do
+        local other=route.destination
+        if other~=first and (not first.id or first.id~=other.id or first.map~=other.map or first.x~=other.x or first.y~=other.y) then return end
+    end
+    return first
 end
 function U:SavePlacement(c)
     local left,top=self.frame:GetLeft(),self.frame:GetTop()
@@ -308,7 +336,7 @@ function U:Create(c)
     self.tuck:SetFrameLevel(header:GetFrameLevel()+3);self:Tip(self.tuck,"Back to the previous view")
     self.editor=CreateFrame("Frame",nil,f);self.editor:SetPoint("TOPLEFT",0,-45);self.editor:SetPoint("TOPRIGHT",0,-45);self.editor:SetHeight(76)
     self.from=self:Edit(self.editor,"From",0,true);self.to=self:Edit(self.editor,"To",-40,false)
-    self.current=self:Button(self.editor,"@",c.profile.width-38,-2,24,28,function() c:Edit(true);c.origin=nil;self.from:SetText("Current location");c:Refresh() end)
+    self.current=self:Button(self.editor,"",c.profile.width-38,-2,24,28,function() c:Edit(true);c.origin=nil;self.from:SetText("Current location");c:Refresh() end);self:Icon(self.current,"location")
     self:Tip(self.current,"Reset origin to your current location")
     self:FilterMenu(self.editor,c)
     self.bodyScroll=CreateFrame("ScrollFrame",nil,f);self.bodyScroll:SetPoint("TOPLEFT",14,-125);self.bodyScroll:SetWidth(c.profile.width-28)
@@ -316,16 +344,28 @@ function U:Create(c)
     self.scrollRail=f:CreateTexture(nil,"ARTWORK");self.scrollRail:SetPoint("TOPLEFT",self.bodyScroll,"TOPRIGHT",4,0);self.scrollRail:SetWidth(2);self.scrollRail:SetColorTexture(.2,.21,.24,1);self.scrollRail:Hide()
     self.scrollThumb=f:CreateTexture(nil,"OVERLAY");self.scrollThumb:SetWidth(2);self.scrollThumb:SetColorTexture(.7,.7,.72,1);self.scrollThumb:Hide()
     self.bodyScroll:SetScript("OnVerticalScroll",function(_,offset) self:ScrollIndicator(offset) end)
+    self.routeHeading=CreateFrame("Frame",nil,f)
+    self.destinationName=self:Text(self.routeHeading,"",13,0,0,c.profile.width-28,20)
+    self.destinationName.atcfEmphasis=true;self.destinationName.atcfSoftShadow=true;self:Font(self.destinationName,13)
+    self.destinationDetail=self:Text(self.routeHeading,"",12,0,-20,c.profile.width-28,20)
+    self.destinationDetail.atcfEmphasis=true;self.destinationDetail.atcfSoftShadow=true;self:Font(self.destinationDetail,12)
+    for _,text in ipairs({self.destinationName,self.destinationDetail}) do text:SetWordWrap(true);text:SetNonSpaceWrap(true);text:SetJustifyV("TOP") end
+    self.sortLabel=self:Text(self.routeHeading,"Sort",11,0,0,36,24)
+    self.routeOrder=self:Menu(self.routeHeading,38,0,c.profile.width-66,"Distance",function() return {{label="Distance",value="distance"},{label="Estimated time",value="time"}} end,function(value) c:SetRouteOrder(value) end)
+    self.routeOrder:SetHeight(24)
+    if self.routeOrder.Text then self.routeOrder.Text.atcfFixedFont=true;self:Font(self.routeOrder.Text,12);self.routeOrder.Text:SetHeight(24) end
+    self.resultsBoundary=f:CreateTexture(nil,"ARTWORK");self.resultsBoundary:SetColorTexture(.26,.28,.32,1);self.resultsBoundary:SetHeight(1);self.resultsBoundary:Hide()
     self.rows={}
     for i=1,40 do
         local b=self:Button(self.body,"",0,-(i-1)*83,c.profile.width-28,77,function()
-            if c.matches then c:Choose(c.matches[i],c.searchOrigin)
+            if c.matches then self.from:ClearFocus();self.to:ClearFocus();c:Choose(c.matches[i],c.searchOrigin)
             else c.selected=i;c:Refresh() end
         end)
         b.text:Hide();b.name=self:Text(b,"",13,10,-6,c.profile.width-50,21);b.name:SetWordWrap(true);b.name:SetNonSpaceWrap(true);b.name:SetJustifyV("TOP")
         b.detail=self:Text(b,"",11,10,-27,c.profile.width-50,41);b.detail:SetWordWrap(true);b.detail:SetNonSpaceWrap(true);b.detail:SetJustifyV("TOP")
         b.distance=self:Text(b,"",11,10,-44,c.profile.width-50,16);b.distance:SetWordWrap(true);b.distance:SetJustifyV("TOP")
         b.itinerary=self:Text(b,"",11,10,-62,c.profile.width-50,16);b.itinerary:SetWordWrap(true);b.itinerary:SetNonSpaceWrap(true);b.itinerary:SetJustifyV("TOP");b.itinerary:Hide()
+        for _,text in ipairs({b.name,b.detail,b.distance,b.itinerary}) do text.atcfSoftShadow=true;text:SetShadowOffset(0,0);text:SetShadowColor(0,0,0,.35) end
         b.name.atcfEmphasis=true;self:Font(b.name,13);b.name:SetTextColor(1,.82,0)
         b.detail.atcfEmphasis=true;self:Font(b.detail,12)
         b.go=self:Button(b,"Go",c.profile.width-80,-23,44,30,function()
@@ -345,7 +385,7 @@ function U:Create(c)
     end
     self.body:EnableMouseWheel(true);self.body:SetScript("OnMouseWheel",scroll);self.bodyScroll:EnableMouseWheel(true);self.bodyScroll:SetScript("OnMouseWheel",scroll)
     self.note=self:Text(f,"",11,14,-200,c.profile.width-28,44);self.note:SetWordWrap(true);self.note:SetJustifyH("CENTER");self.note:SetTextColor(.68,.71,.76)
-    self.go=self:Button(f,"Find routes",14,-246,c.profile.width-88,30,function() if not c.destination and M.HasFilter(c.filter) then c:Plan() else c:Enter() end end)
+    self.go=self:Button(f,"Find routes",14,-246,c.profile.width-88,30,function() self.from:ClearFocus();self.to:ClearFocus();c:PrimaryAction() end)
     self.stop=self:Button(f,"",c.profile.width-42,-246,28,28,function() c:Stop() end);self:Icon(self.stop,"close");self:ButtonColor(self.stop,{.52,.12,.14,1},{.70,.18,.20,1});self:Tip(self.stop,"Stop navigation")
     self.guidance=CreateFrame("Frame",nil,f);self.guidance:SetPoint("TOPLEFT",14,-48);self.guidance:SetSize(c.profile.width-28,94)
     self.arrow=self.guidance:CreateTexture(nil,"ARTWORK");self.arrow:SetTexture(MEDIA.."arrow.tga");self.arrow:SetPoint("TOPLEFT",0,-4);self.arrow:SetSize(32,32);self.arrow:SetVertexColor(unpack(accent))
@@ -419,10 +459,10 @@ function U:Layout(c)
     local y=math.max(-(sh-math.min(f:GetHeight(),sh)),math.min(0,p.y))
     if not self.resizing then
         f:SetPoint("TOPLEFT",UIParent,"TOPLEFT",math.max(0,math.min(sw-p.width,x)),y)
-        if self.resizeGrip:IsShown() then
-            local chrome=math.max(0,f:GetHeight()-self.bodyScroll:GetHeight())
-            f:SetResizeBounds(280,chrome+100,math.min(640,sw-16),math.max(chrome+100,math.min(chrome+560,sh-16)))
-        end
+    end
+    if self.resizeGrip:IsShown() then
+        local chrome=math.max(0,f:GetHeight()-self.bodyScroll:GetHeight())
+        f:SetResizeBounds(280,chrome+100,math.min(640,sw-16),math.max(chrome+100,math.min(chrome+560,sh-16)))
     end
     self.handle:SetScale(scale);self.handle:ClearAllPoints()
     self.handle:SetPoint(p.dock=="right" and "RIGHT" or "LEFT",UIParent,p.dock=="right" and "RIGHT" or "LEFT",0,0)
@@ -444,6 +484,7 @@ function U:LayoutGuidance(c)
     local height=footer+40;local changed=self.frame:GetHeight()~=height;self.frame:SetHeight(height);return changed
 end
 function U:Refresh(c)
+    if not self.dragging and not self.resizing then self.frame:SetScale(math.min(c.profile.scale,UIParent:GetHeight()/660,UIParent:GetWidth()/(c.profile.width+16))) end
     if self.menuLock then self.menuLock.text:SetText(c.profile.locked and "Unlock panel" or "Lock panel") end
     local compact=c.compact and c.nav.route~=nil
     local expanded=c.searching or c.matches~=nil or c.destination~=nil or #c.results>0 or c.nav.route~=nil or c.planned
@@ -454,12 +495,32 @@ function U:Refresh(c)
     local tint=M.HasFilter(c.filter) and c.profile.colors.accent or {.65,.68,.73}
     for _,line in ipairs(self.filterLines) do line:SetColorTexture(tint[1],tint[2],tint[3],1) end
     self.pause:SetShown(compact);self:PauseIcon(c)
+    self.routeHeading:Hide();self.resultsBoundary:Hide()
     if not self.from:HasFocus() then self.from:SetText(c.origin and c.origin.name or "Current location") end
     if not self.to:HasFocus() then self.to:SetText(c.destination and c.destination.name or c.query or "") end
     if compact then self:Guidance(c,N.Adapter.Position(),c:Context(),GetTime());self:LayoutGuidance(c)
     else
-        local bodyHeight=0;local origin=c:SearchPosition(c.searchOrigin)
-        local categories={class="Class trainer",profession="Profession trainer",trainer="Trainer",auction="Auction house",quest="Quest NPC",flight="Flight point",place="Saved place"}
+        local bodyHeight=0;local origin=c:SearchPosition(c.searchOrigin);local bodyTop=125
+        local comparing=not c.matches and #c.results>0
+        local shared=comparing and self:SharedDestination(c.results)
+        if comparing then
+            local heading=self.routeHeading;heading:Show();heading:ClearAllPoints();heading:SetPoint("TOPLEFT",14,-125);heading:SetWidth(c.profile.width-28)
+            self.destinationName:SetShown(shared~=nil);self.destinationDetail:SetShown(shared~=nil)
+            local y=0
+            if shared then
+                self.destinationName:SetWidth(c.profile.width-28);self.destinationName:SetText(shared.name);self.destinationName:SetTextColor(1,.82,0)
+                y=self:WrappedHeight(self.destinationName)+1
+                self.destinationDetail:SetWidth(c.profile.width-28);self.destinationDetail:SetText(self:DestinationDetail(shared));self.destinationDetail:ClearAllPoints();self.destinationDetail:SetPoint("TOPLEFT",0,-y)
+                y=y+self:WrappedHeight(self.destinationDetail)+6
+            end
+            self.sortLabel:ClearAllPoints();self.sortLabel:SetPoint("TOPLEFT",0,-y)
+            self.routeOrder:ClearAllPoints();self.routeOrder:SetPoint("TOPLEFT",38,-y);self.routeOrder:SetWidth(c.profile.width-66)
+            if self.routeOrder.Text then self.routeOrder.Text:SetWidth(c.profile.width-102) end
+            self.routeOrder.value=c.profile.routeOrder;self.routeOrder:SetDefaultText(c.profile.routeOrder=="time" and "Estimated time" or "Distance");self:SyncMenus()
+            heading:SetHeight(y+30);bodyTop=bodyTop+y+30
+        end
+        self.bodyTop=bodyTop;self.bodyScroll:ClearAllPoints();self.bodyScroll:SetPoint("TOPLEFT",14,-bodyTop)
+        local textColor=c.profile.colors.text;local secondary={textColor[1]*.82,textColor[2]*.82,textColor[3]*.82}
         for i,b in ipairs(self.rows) do
             local item=c.matches and c.matches[i] or c.results[i];b:SetShown(item~=nil)
             b.go:SetShown(item~=nil and not c.matches)
@@ -467,25 +528,32 @@ function U:Refresh(c)
             b.locked:SetShown(item~=nil and not c.matches and item.unavailable=="undiscovered")
             b.lockedText:SetTextColor(.95,.25,.25)
             local width=c.profile.width-(c.matches and 50 or 100)
-            b.name:SetWidth(width);b.detail:SetWidth(width);b.distance:SetWidth(width);b.itinerary:SetWidth(width);b.itinerary:SetShown(item~=nil and not c.matches)
+            b.name:SetWidth(width);b.detail:SetWidth(width);b.distance:SetWidth(width);b.itinerary:SetWidth(c.profile.width-48)
+            b.detail:SetShown(item~=nil);b.distance:SetShown(item~=nil and not shared)
+            local hasLegs=item and not c.matches and M.RouteMode(item)=="Walk + fly"
+            b.itinerary:SetShown(hasLegs)
             if item then
                 local destination=c.matches and item or item.destination
-                b.name:SetText(destination.name);b.name:SetTextColor(1,.82,0)
-                b.detail:SetText((destination.role or categories[destination.category] or "Destination")..(destination.zone and destination.zone~="" and (" • "..destination.zone) or ""))
+                b.name:SetText(shared and M.RouteMode(item) or destination.name)
+                if shared then b.name:SetTextColor(unpack(textColor)) else b.name:SetTextColor(1,.82,0) end
+                b.detail.atcfEmphasis=not shared;self:Font(b.detail,shared and 11 or 12)
+                b.detail:SetText(shared and self:RouteTotal(item) or self:DestinationDetail(destination));b.detail:SetTextColor(unpack(textColor))
+                b.distance:SetTextColor(unpack(secondary));b.itinerary:SetTextColor(unpack(secondary))
                 if c.matches then
                     local distance=M.Distance(origin,item)
                     b.distance:SetText(origin and item.map and origin.map~=item.map and "Other continent" or self:ListingDistance(distance,M.GroundSeconds(distance,c.ctx.speed,"bearing")))
                 else
-                    b.distance:SetText(self:ListingDistance(item.distance,item.eta));b.itinerary:SetText(M.RouteLegs(item,c.ctx.speed))
+                    b.distance:SetText(M.RouteMode(item).." • "..self:RouteTotal(item));b.itinerary:SetText(M.RouteLegs(item,c.ctx.speed))
                 end
                 b.name:ClearAllPoints();b.name:SetPoint("TOPLEFT",10,-4)
-                local y=4+self:WrappedHeight(b.name,16)+1
-                b.detail:ClearAllPoints();b.detail:SetPoint("TOPLEFT",10,-y);y=y+self:WrappedHeight(b.detail,15)+5
-                b.distance:ClearAllPoints();b.distance:SetPoint("TOPLEFT",10,-y);y=y+self:WrappedHeight(b.distance,14)
-                if not c.matches then b.itinerary:ClearAllPoints();b.itinerary:SetPoint("TOPLEFT",10,-y-4);y=y+4+self:WrappedHeight(b.itinerary,14) end
-                local rowHeight=y+5
+                local y=4+self:WrappedHeight(b.name)+1
+                b.detail:ClearAllPoints();b.detail:SetPoint("TOPLEFT",10,-y);y=y+self:WrappedHeight(b.detail)
+                if not shared then b.distance:ClearAllPoints();b.distance:SetPoint("TOPLEFT",10,-y-3);y=y+3+self:WrappedHeight(b.distance) end
+                if not c.matches then y=math.max(y,36) end
+                if hasLegs then b.itinerary:ClearAllPoints();b.itinerary:SetPoint("TOPLEFT",10,-y-4);y=y+4+self:WrappedHeight(b.itinerary) end
+                local rowHeight=y+4
                 b:SetHeight(rowHeight);b:ClearAllPoints();b:SetPoint("TOPLEFT",0,-bodyHeight);b.bodyOffset=bodyHeight
-                b.go:ClearAllPoints();b.go:SetPoint("RIGHT",b,"RIGHT",-8,0);bodyHeight=bodyHeight+rowHeight+6
+                b.go:ClearAllPoints();b.go:SetPoint("TOPRIGHT",b,"TOPRIGHT",-8,-6);bodyHeight=bodyHeight+rowHeight+5
                 b.normalColor=(c.matches and i==c.highlight or not c.matches and i==c.selected) and {.22,.27,.18,1} or {.10,.11,.14,1};b.bg:SetVertexColor(unpack(b.normalColor))
                 local tip
                 if c.matches then
@@ -504,7 +572,7 @@ function U:Refresh(c)
                 self:Tip(b,tip)
             end
         end
-        bodyHeight=math.max(0,bodyHeight-6)
+        bodyHeight=math.max(0,bodyHeight-5)
         self.body:SetHeight(math.max(1,bodyHeight))
         local message=expanded and c.status or nil
         if not message and c.matches and #c.matches==0 then
@@ -520,25 +588,41 @@ function U:Refresh(c)
         local messageHeight=message and (self:WrappedHeight(self.note,32)+10) or 0
         local hasFooter=self.go:IsShown() or self.stop:IsShown() or self.fold:IsShown()
         local scale=self.resizing and self.frame:GetScale() or math.min(c.profile.scale,UIParent:GetHeight()/660,UIParent:GetWidth()/(c.profile.width+16))
-        local limit=(UIParent:GetHeight()-16)/scale-125-messageHeight-(hasFooter and 42 or 8)
-        local visible=math.max(0,math.min(self.resizing and c.profile.resultsHeight or bodyHeight,c.profile.resultsHeight,math.max(60,limit)))
+        local limit=(UIParent:GetHeight()-16)/scale-bodyTop-messageHeight-(hasFooter and 50 or 20)
+        local requested=c.profile.resultsHeight
+        if self.resizing then
+            -- Width changes can wrap fixed headings/status text while native
+            -- sizing owns the outer frame. Rebudget the viewport immediately.
+            self.resizeChrome=bodyTop+messageHeight+(bodyHeight>0 and 8 or 0)+(hasFooter and 42 or 12)
+            requested=math.max(1,math.min(560,self.frame:GetHeight()-self.resizeChrome))
+            c.profile.resultsHeight=math.max(100,requested)
+        end
+        local visible=math.max(0,math.min(self.resizing and requested or bodyHeight,requested,math.max(1,limit)))
         self.bodyScroll:SetHeight(math.max(1,visible));self.bodyScrollRange=math.max(0,bodyHeight-visible)
         local key=c.matches or c.results;local selected=c.matches and (c.highlight or 1) or (c.selected or 1)
         local scroll=self.scrollResults~=key and 0 or self.bodyScroll:GetVerticalScroll()
-        if self.scrollResults~=key or self.scrollHighlight~=(c.matches and c.highlight or c.selected) then
-            local row=self.rows[selected]
+        local row=self.rows[selected]
+        local reflow=row and (self.scrollRowOffset~=row.bodyOffset or self.scrollRowHeight~=row:GetHeight() or self.scrollViewport~=visible or self.scrollWidth~=c.profile.width)
+        if self.scrollResults~=key or self.scrollHighlight~=(c.matches and c.highlight or c.selected) or reflow then
             if row and row:IsShown() then
                 if row:GetHeight()>=visible or row.bodyOffset<scroll then scroll=row.bodyOffset
                 elseif row.bodyOffset+row:GetHeight()>scroll+visible then scroll=row.bodyOffset+row:GetHeight()-visible end
             end
         end
+        self.scrollRowOffset=row and row.bodyOffset;self.scrollRowHeight=row and row:GetHeight();self.scrollViewport=visible;self.scrollWidth=c.profile.width
         self.scrollResults=key;self.scrollHighlight=c.matches and c.highlight or c.selected
         self.bodyScroll:SetVerticalScroll(math.max(0,math.min(scroll,self.bodyScrollRange)));self:ScrollIndicator(self.bodyScroll:GetVerticalScroll())
-        local y=125+visible;self.note:ClearAllPoints();self.note:SetPoint("TOPLEFT",14,-y)
+        local y=bodyTop+visible
+        if bodyHeight>0 then
+            self.resultsBoundary:SetShown(self.bodyScrollRange>0);self.resultsBoundary:ClearAllPoints();self.resultsBoundary:SetPoint("TOPLEFT",14,-y-4);self.resultsBoundary:SetWidth(c.profile.width-28)
+            y=y+8
+        end
+        self.note:ClearAllPoints();self.note:SetPoint("TOPLEFT",14,-y)
         local footer=y+messageHeight
         self.go:ClearAllPoints();self.go:SetPoint("TOPLEFT",c.nav.route and 74 or 44,-footer);self.stop:ClearAllPoints();self.stop:SetPoint("TOPLEFT",c.profile.width-42,-footer)
         self.fold:ClearAllPoints();self.fold:SetPoint("TOPLEFT",14,-footer)
-        self.go.text:SetText("Find routes");if not self.resizing then self.frame:SetHeight(expanded and (footer+(hasFooter and 42 or 12)) or 129) end
+        self.go.text:SetText(c:PrimaryActionLabel());self.go:SetEnabled(not c.searching and not (c.matches and #c.matches==0))
+        if not self.resizing then self.frame:SetHeight(expanded and (footer+(hasFooter and 42 or 12)) or 129) end
     end
     self:Layout(c)
 end

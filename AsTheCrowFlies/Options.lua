@@ -94,7 +94,7 @@ function O:Create(c)
     end
     self:Label(page,"Route order",328,-105)
     self.order=self:Dropdown(page,328,-125,260,"Distance",function() return {{label="Distance",value="distance"},{label="Estimated time",value="time"}} end,function(value)
-        c.profile.routeOrder=value;if #c.results>0 then c:Plan() end;c:ApplyProfile()
+        c:SetRouteOrder(value)
     end)
     self.overlays=self:Check(page,"World / zone map markers","mapMarkers",328,-166)
     self.mapMarkers=self.overlays

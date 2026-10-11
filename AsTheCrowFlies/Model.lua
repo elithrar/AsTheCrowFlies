@@ -171,6 +171,10 @@ function M.GroundSeconds(distance,speed,quality)
     speed=M.Number(speed) and speed>0 and speed<=50 and speed or 7
     return distance/speed*(quality=="bearing" and 1.35 or 1)
 end
+function M.RouteMode(route)
+    for _,leg in ipairs(route.legs) do if leg.mode=="flight" then return "Walk + fly" end end
+    return "Walk"
+end
 function M.RouteLegs(route,speed)
     local before,after,flight=0,0,0;local first,last
     for _,leg in ipairs(route.legs) do
@@ -182,8 +186,8 @@ function M.RouteLegs(route,speed)
             if first then after=after+seconds else before=before+seconds end
         end
     end
-    if not first then return "Walk (~"..M.Minutes(before)..")" end
-    return "Walk (~"..M.Minutes(before)..")\n"..(first.start.name or "Departure").." to "..(last.finish.name or "Arrival").." (~"..M.Minutes(flight)..")\nWalk (~"..M.Minutes(after)..")"
+    if not first then return "Walk ~"..M.Minutes(before) end
+    return "Walk ~"..M.Minutes(before).."\nFly ~"..M.Minutes(flight)..": "..(first.start.name or "Departure").." to "..(last.finish.name or "Arrival").."\nWalk ~"..M.Minutes(after)
 end
 function M.Yards(v) return M.Number(v) and (v>=1000 and string.format("%.1f k yd",v/1000) or string.format("%.0f yd",v)) or "distance unknown" end
 -- World coordinates increase north (x) and west (y); screen axes are east/up.

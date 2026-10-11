@@ -278,7 +278,7 @@ test('bearing ETA stays consistent across cost summary display and remaining tra
     local route=N.Routes.Summary({before,flight,after},after.finish,c)
     assert(route.distance==1700 and route.walk==700 and route.flight==1000 and route.eta==225 and route.groundAllowance)
     assert(N.Routes.Seconds(before,c)==67.5 and route.legs[1].seconds==67.5 and route.legs[2].seconds==90)
-    assert(M.RouteLegs(route,7)=='Walk (~1 min)\nDeparture to Arrival (~2 min)\nWalk (~1 min)')
+    assert(M.RouteLegs(route,7)=='Walk ~1 min\nFly ~2 min: Departure to Arrival\nWalk ~1 min')
     local state=V.New();assert(V.Start(state,route,pos(0),0))
     local distance,eta=V.Remaining(state,pos(0),7,0);assert(distance==1700 and eta==route.eta)
     distance,eta=V.Remaining(state,pos(175),7,10);assert(distance==1525 and eta==191.25)
@@ -290,10 +290,29 @@ test('route cards retain planned ground timing while remaining guidance uses liv
     local origin,goal=pos(0),pos(700,0,'goal')
     local leg={mode='walk',distance=700,quality='bearing',start=origin,finish=goal}
     local route=R.Summary({leg},goal,ctx)
-    assert(route.eta==135 and M.RouteLegs(route,14)=='Walk (~2 min)')
+    assert(route.eta==135 and M.RouteMode(route)=='Walk' and M.RouteLegs(route,14)=='Walk ~2 min')
     local state=V.New();assert(V.Start(state,route,origin,0))
     local _,seconds=V.Remaining(state,origin,14,0);assert(seconds==67.5)
-    assert(M.RouteLegs({legs={leg}},14)=='Walk (~1 min)' and not leg.seconds)
+    assert(M.RouteLegs({legs={leg}},14)=='Walk ~1 min' and not leg.seconds)
+end)
+
+test('flight summaries label every estimate and preserve full endpoint names and stored times',function()
+    local departure='Thelsamar, Loch Modan';local arrival='Ironforge, Dun Morogh'
+    local legs={
+        {mode='walk',distance=700,quality='bearing',seconds=40},
+        {mode='flight',distance=10000,seconds=30,start={name=departure},finish={name='Intermediate master'}},
+        {mode='flight',distance=10000,seconds=60,start={name='Intermediate master'},finish={name=arrival}},
+        {mode='walk',distance=700,quality='bearing',seconds=20},
+    }
+    local route={legs=legs}
+    assert(M.RouteMode(route)=='Walk + fly')
+    local text=M.RouteLegs(route,14)
+    assert(text=='Walk ~<1 min\nFly ~2 min: '..departure..' to '..arrival..'\nWalk ~<1 min')
+    local lines=0
+    for line in text:gmatch('[^\n]+') do
+        assert(line:match('^Walk ~') or line:match('^Fly ~'));lines=lines+1
+    end
+    assert(lines==3 and legs[1].seconds==40 and legs[3].seconds==60 and legs[4].seconds==20)
 end)
 
 test('route metadata remains isolated while immutable flight geometry is shared',function()

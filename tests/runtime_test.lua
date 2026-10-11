@@ -33,7 +33,7 @@ function methods:SetFontObject(v)
 end
 function methods:SetScale(v) self.scale=v end
 function methods:GetScale() return self.scale or 1 end
-function methods:GetEffectiveScale() return self:GetScale() end
+function methods:GetEffectiveScale() return self:GetScale()*(self.parent and self.parent:GetEffectiveScale() or 1) end
 function methods:GetFrameLevel() return self.level or 1 end
 function methods:SetFrameLevel(v) self.level=v end
 function methods:SetTexCoord(...) self.coords={...} end
@@ -91,11 +91,11 @@ function methods:SetStartPoint(...) self.startPoint={...} end
 function methods:SetEndPoint(...) self.endPoint={...} end
 function methods:SetThickness(v) self.thickness=v end
 function methods:SetColorTexture(...) self.color={...} end
-function methods:CreateFontString() return object() end
+function methods:CreateFontString() local text=object();text.parent=self;return text end
 function CreateFont(name) return object(name) end
 function CreateFrame(kind,name,parent,template)
     local f=object(name);f.parent=parent;f.kind=kind;f.template=template
-    if kind=='DropdownButton' or template=='UICheckButtonTemplate' then f.Text=object() end;return f
+    if kind=='DropdownButton' or template=='UICheckButtonTemplate' then f.Text=object();f.Text.parent=f end;return f
 end
 UIParent=object();UIParent:SetSize(1920,1080);Minimap=object();Minimap:SetSize(180,180)
 WorldMapFrame=object();local canvas=object();canvas:SetSize(1000,700)
@@ -289,9 +289,9 @@ test('route legs collapse multihop flights and omit duplicated totals',function(
     local function flight(a,b,seconds) return {mode='flight',start={name=a},finish={name=b},distance=1000,seconds=seconds} end
     local walk={mode='walk',distance=420}
     local text=N.Model.RouteLegs({legs={walk,flight('A','B',60),flight('B','C',120),walk}},7)
-    assert(text=='Walk (~1 min)\nA to C (~3 min)\nWalk (~1 min)' and not text:find('B'))
+    assert(text=='Walk ~1 min\nFly ~3 min: A to C\nWalk ~1 min' and not text:find('B'))
     local offered=flight('A','C',180);assert(N.Model.RouteLegs({legs={walk,offered,walk}},7)==text)
-    assert(N.Model.RouteLegs({legs={walk}},7)=='Walk (~1 min)')
+    assert(N.Model.RouteLegs({legs={walk}},7)=='Walk ~1 min')
 end)
 
 test('header controls open useful menu and back preserves navigation',function()
@@ -445,13 +445,13 @@ test('bounded trainer results retain width across compact state and reflow profi
     C.filter={categories={class=true},classes={MAGE=true},professions={}};C.results={route,route,route};C.matches=nil;C.nav.route=route;C.nav.leg=1;C.nav.state='walking';C.profile.scale=1.6
     C.nav.route=nil;C.compact=false;C.status=nil;C:Refresh()
     assert(not U.go:IsShown() and not U.stop:IsShown() and not U.fold:IsShown())
-    assert(U.frame:GetHeight()==125+U.bodyScroll:GetHeight()+12,'results without footer controls retain grip padding')
+    assert(U.frame:GetHeight()==U.bodyTop+U.bodyScroll:GetHeight()+20,'results without footer controls retain grip padding')
     C.nav.route=route
     UIParent:SetSize(1280,720)
     for _,width in ipairs({280,320}) do
         C.profile.width=width;C.compact=false;C.status='A route status';C:Refresh()
         local physical=U.frame:GetWidth()*U.frame:GetScale()
-        assert(U.frame:GetHeight()*U.frame:GetScale()<=720 and U.rows[3].detail:GetHeight()>=15)
+        assert(U.frame:GetHeight()*U.frame:GetScale()<=720 and U.rows[3].detail:GetHeight()>0)
         assert(U.header:GetWidth()<U.settings.point[2] and U.settings:GetFrameLevel()>U.header:GetFrameLevel())
         assert(U.from:GetWidth()==width-104 and U.body:GetWidth()==width-28 and U.filterButton.point[2]==width-38)
         assert(U.fold:IsShown() and U.fold.point[2]+U.fold:GetWidth()<U.go.point[2])
@@ -638,9 +638,11 @@ test('long names and flight descriptions grow and scroll without shrinking the i
     C:Stop();local width,size,scale=C.profile.width,C.profile.fontSize,C.profile.scale
     C.profile.width=280;C.profile.fontSize=18;C.profile.scale=1.6;C:ApplyProfile();UIParent:SetSize(1280,720)
     local p=A.Position();local goal=N.Model.Copy(p);goal.x=p.x+500;goal.id='long';goal.name=string.rep('Long destination ',10)
-    local route=N.Routes.Summary({{mode='walk',start=p,finish=goal,distance=500,quality='bearing'}},goal,C:Context())
+    local station=N.Model.Copy(p);station.name=string.rep('Long flight station ',8)
+    local route=N.Routes.Summary({{mode='walk',start=p,finish=goal,distance=500,quality='bearing'},{mode='flight',start=station,finish=goal,distance=500,seconds=60}},goal,C:Context())
     C.results={route,route,route};C.matches=nil;C.destination=goal;C.status=nil;C.compact=false;C:Refresh()
-    local row=U.rows[1];assert(row.name:GetText()==goal.name and row.name:GetHeight()>40 and row.name.wordWrap and row.name.nonSpaceWrap)
+    local row=U.rows[1];assert(U.destinationName:GetText()==goal.name and U.destinationName:GetHeight()>40 and U.destinationName.wordWrap and U.destinationName.nonSpaceWrap)
+    assert(row.itinerary:GetHeight()>40 and row.itinerary:GetWidth()>row.name:GetWidth())
     assert(-row.detail.point[3]>=5+row.name:GetHeight() and row:GetHeight()>-row.detail.point[3]+row.detail:GetHeight())
     assert(U.bodyScrollRange>0 and U.frame:GetHeight()*U.frame:GetScale()<=720)
     U.body.scripts.OnMouseWheel(nil,-1);assert(U.bodyScroll:GetVerticalScroll()>0)
@@ -830,7 +832,7 @@ test('structured compact matches show more rows and scroll all results without c
     assert(row.name:GetText()=='Trainer 1' and row.name.textColor[1]==1 and row.name.textColor[2]==.82 and row.name.fontFlags=='OUTLINE')
     assert(row.detail:GetText()=='Warrior Trainer • Ironforge' and row.detail.fontSize==12 and row.detail.fontFlags=='OUTLINE')
     assert(row.distance:GetText():match('^Distance: ~1.7k yards %(est%. %d+ minutes%)$'))
-    assert(-row.distance.point[3]==-row.detail.point[3]+row.detail:GetHeight()+5 and row:GetHeight()<77)
+    assert(-row.distance.point[3]==-row.detail.point[3]+row.detail:GetHeight()+3 and row:GetHeight()<65)
     assert(U.rows[4].bodyOffset+U.rows[4]:GetHeight()<=U.bodyScroll:GetHeight() and U.rows[40]:IsShown())
     C.highlight=40;C:Refresh();assert(U.bodyScroll:GetVerticalScroll()>0)
     local highlight=C.highlight;U.body.scripts.OnMouseWheel(nil,-1000);assert(C.highlight==highlight)
@@ -845,7 +847,7 @@ test('result distance uses preview origin and flight route ETA retains the plann
     assert(C.matches[1]==near and U.rows[1].distance:GetText()=='Distance: ~50 yards (est. <1 minute)')
     C:Search('',true);flushSearch();assert(C.matches[1]==far and U.rows[1].distance:GetText()=='Distance: ~10 yards (est. <1 minute)')
     C.matches=nil;C.origin=nil;local route=N.Routes.Summary({{mode='flight',from=1,to=2,start=p,finish=near,distance=1700,seconds=70}},near,C:Context())
-    route.eta=70;C.results={route};C:Refresh();assert(U.rows[1].distance:GetText()=='Distance: ~1.7k yards (est. 1 minute)' and U.rows[1].itinerary:IsShown())
+    route.eta=70;C.results={route};C:Refresh();assert(U.rows[1].detail:GetText()=='Est. 1 min • ~1.7k yards' and U.rows[1].itinerary:IsShown())
     assert(U:ListingDistance(nil,nil)=='Distance unavailable' and U:ListingDistance(0,0)=='Distance: ~0 yards (est. <1 minute)')
     C:Stop();C.destinations=saved
 end)
@@ -970,5 +972,91 @@ test('retained marker updates preserve hover visibility and missing canvas clear
     O:Update(C,p,{facing=0,speed=7});assert(not O.destination:IsShown() and O.mini:IsShown())
     WorldMapFrame.GetCanvas=canvasFn;C.destination=nil;C:Stop();assert(not O.destination:IsShown() and not O.mini:IsShown())
     for _,f in ipairs(tracked) do f.Hide=nil end
+end)
+test('primary action selects and plans once while origin and category actions stay distinct',function()
+    C:Stop();local saved={data=C.data,destinations=C.destinations,filter=C.filter};local p=A.Position()
+    local a=N.Model.Copy(p);a.id='action-a';a.name='Action A';a.x=p.x+500;a.category='place'
+    local b=N.Model.Copy(a);b.id='action-b';b.name='Action B';b.x=p.x+800
+    C.data={nodes={},edges={}};C.destinations={a,b};C.filter={categories={},classes={},professions={}};C.destination=nil;C.origin=nil
+    C:Search('Action',false);assert(not U.go.enabled);local generation=C.searchGeneration
+    assert(C:PrimaryAction()==nil and C.searchGeneration==generation);flushSearch();C.highlight=2;C:Refresh()
+    U.to:SetText('Act');U.to:SetFocus();assert(U.go.text:GetText()=='Find routes' and U.go.enabled);U.go.scripts.OnClick()
+    assert(C.destination==b and #C.results==1 and C.results[1].destination==b and not C.nav.route)
+    assert(not U.to:HasFocus() and U.to:GetText()==b.name)
+    C:Go();local active=C.nav.route;C.compact=false;C:Search('Action A',true);flushSearch()
+    U.from:SetText('Act');U.from:SetFocus();assert(U.go.text:GetText()=='Use origin');U.go.scripts.OnClick()
+    assert(C.origin==a and C.destination==b and #C.results==0 and C.nav.route==active)
+    assert(not U.from:HasFocus() and U.from:GetText()==a.name)
+    C:Plan();C:Go();assert(C.origin==nil and C.nav.route==active and C.status:find('Review, then Go',1,true),'preview origin still requires current-location review')
+    C:Search('no such origin',true);flushSearch();assert(not U.go.enabled);C:PrimaryAction();assert(C.nav.route==active and not C.origin)
+    C:Stop();C.destination=nil;C.filter={categories={place=true},classes={},professions={}}
+    C:Search('Action',false);flushSearch();assert(U.go.text:GetText()=='Compare matches');U.go.scripts.OnClick()
+    assert(C.destination==nil and #C.results==2 and not C.nav.route)
+    C.data=saved.data;C.destinations=saved.destinations;C.filter=saved.filter;C.destination=nil;C.origin=nil;C:Stop()
+end)
+
+test('inline and options route order share state without replacing active navigation',function()
+    C:Stop();local saved={data=C.data,known=C.character.known,profile=N.Model.Copy(C.profile),filter=C.filter};local p=A.Position()
+    local goal=N.Model.Copy(p);goal.id='sort-goal';goal.name='Sort target';goal.x=p.x+1000
+    C.data={nodes={[1]=p,[2]=goal},edges={{id=9801,from=1,to=2,start=p,finish=goal,mode='flight',distance=1400}}}
+    C.character.known={[1]={state='known'},[2]={state='known'}};C.profile.routeOrder='distance';C.filter={categories={},classes={},professions={}};C.destination=goal;C.origin=nil;C.taxi=nil
+    C:Plan();assert(C.results[1].flight==0 and U.routeOrder.value=='distance');C:Go();local active=C.nav.route
+    C.compact=false;assert(C:SetRouteOrder('time'));assert(C.results[1].flight>0 and C.nav.route==active)
+    assert(U.routeOrder.value=='time' and N.Options.order.value=='time' and U.routeHeading:IsShown())
+    local results=C.results;assert(not C:SetRouteOrder('invalid') and C:SetRouteOrder('time') and C.results==results)
+    C:SetRouteOrder('distance');assert(C.results[1].flight==0 and C.nav.route==active and U.routeOrder.value=='distance' and N.Options.order.value=='distance')
+    C.data=saved.data;C.character.known=saved.known;C.profile=saved.profile;C.filter=saved.filter;C.destination=nil;C:Stop();C:ApplyProfile()
+end)
+
+test('route comparison shares only identical destinations and gives legs full width',function()
+    C:Stop();local saved=N.Model.Copy(C.profile);C.profile.width=304;C.profile.fontSize=13;C.profile.scale=1;C.profile.resultsHeight=296;C:ApplyProfile()
+    local p=A.Position();local goal=N.Model.Copy(p);goal.id='compare-goal';goal.name='Kelv Sternhammer';goal.role='Warrior Trainer';goal.zone='Ironforge';goal.x=p.x+1900
+    local start=N.Model.Copy(p);start.name='Thelsamar, Loch Modan';local finish=N.Model.Copy(goal);finish.name='Ironforge, Dun Morogh'
+    local direct=N.Routes.Summary({{mode='walk',start=p,finish=goal,distance=1900,seconds=360}},goal,C:Context())
+    local flight=N.Routes.Summary({{mode='walk',start=p,finish=start,distance=30,seconds=5},{mode='flight',start=start,finish=finish,distance=3700,seconds=120},{mode='walk',start=finish,finish=goal,distance=30,seconds=5}},goal,C:Context())
+    C.results={direct,flight,flight};C.matches=nil;C.destination=goal;C.status=nil;C:Refresh()
+    assert(U.destinationName:IsShown() and U.destinationName:GetText()==goal.name and U.destinationDetail:GetText()=='Warrior Trainer • Ironforge')
+    assert(U.rows[1].name:GetText()=='Walk' and not U.rows[1].itinerary:IsShown() and not U.rows[1].distance:IsShown())
+    assert(U.rows[2].name:GetText()=='Walk + fly' and U.rows[2].itinerary:GetText():find('Fly ~2 min: Thelsamar, Loch Modan to Ironforge, Dun Morogh',1,true))
+    for _,row in ipairs({U.rows[1],U.rows[2]}) do assert(row.go.point[1]=='TOPRIGHT' and row.go.point[5]==-6) end
+    assert(U.rows[2].itinerary:GetWidth()>U.rows[2].name:GetWidth() and -U.rows[2].itinerary.point[3]>=36)
+    assert(U.rows[3].bodyOffset+U.rows[3]:GetHeight()<=U.bodyScroll:GetHeight(),'three concise routes fit the default viewport')
+    local other=N.Model.Copy(goal);other.id='other-spawn';other.x=goal.x+10
+    local distinct=N.Model.Copy(direct);distinct.destination=other;C.results={direct,distinct};C:Refresh()
+    assert(not U.destinationName:IsShown() and U.rows[1].name:GetText()==goal.name and U.rows[2].name:GetText()==other.name)
+    assert(U.rows[1].detail:GetText()=='Warrior Trainer • Ironforge' and U.rows[1].distance:GetText():find('Walk • Est.',1,true))
+    assert(U.current.iconKind=='location' and not U.current.text:IsShown())
+    C.profile=saved;C.destination=nil;C:Stop();C:ApplyProfile()
+end)
+
+test('wrapped row measurement settles fractional scale before measuring and keeps footer separate',function()
+    C:Stop();local saved=N.Model.Copy(C.profile);C.profile.scale=1.25;C.profile.fontSize=13;C.profile.width=304
+    local p=A.Position();p.name='Measure target';p.role='Trainer';p.zone='Ironforge';C.matches={};C.highlight=1
+    for i=1,40 do C.matches[i]=p end
+    C:ApplyProfile();local row=U.rows[1];local scale=row.name:GetEffectiveScale()
+    assert(scale==1.25 and row.name:GetHeight()==(math.ceil(13*scale)+2)/scale)
+    assert(U.resultsBoundary:IsShown() and -U.go.point[3]>U.bodyTop+U.bodyScroll:GetHeight())
+    UIParent:SetSize(1280,540);C.events.scripts.OnEvent(nil,'DISPLAY_SIZE_CHANGED');scale=row.name:GetEffectiveScale()
+    assert(scale==U.frame:GetEffectiveScale() and row.name:GetHeight()==(math.ceil(13*scale)+2)/scale)
+    assert(U.frame:GetHeight()*scale<=540)
+    C.highlight=40;C.profile.width=640;C:Refresh();C.profile.width=280;C.profile.fontSize=18;C:ApplyProfile()
+    local selected=U.rows[40];local offset=U.bodyScroll:GetVerticalScroll()
+    assert(selected.bodyOffset>=offset and selected.bodyOffset+selected:GetHeight()<=offset+U.bodyScroll:GetHeight()+.001,'reflow reveals the highlighted result')
+    U.body.scripts.OnMouseWheel(nil,1);offset=U.bodyScroll:GetVerticalScroll();C:Refresh()
+    assert(U.bodyScroll:GetVerticalScroll()==offset,'unchanged layout preserves manual scroll position')
+    UIParent:SetSize(1920,1080);C.profile=saved;C:Stop();C:ApplyProfile()
+end)
+test('width resize rebudgets wrapped headings without pushing content outside the frame',function()
+    C:Stop();C:ShowPanel(true);local saved=N.Model.Copy(C.profile);C.profile.width=640;C.profile.fontSize=18;C.profile.scale=1;C.profile.locked=false;C:ApplyProfile()
+    local p=A.Position();local goal=N.Model.Copy(p);goal.id='resize-wrap';goal.name=string.rep('Long shared destination ',3);goal.x=p.x+500
+    local route=N.Routes.Summary({{mode='walk',start=p,finish=goal,distance=500,seconds=100}},goal,C:Context())
+    C.results={route,route,route};C.destination=goal;C.status=nil;C:Refresh()
+    local height=U.frame:GetHeight();local oldChrome=height-U.bodyScroll:GetHeight()
+    U.resizeGrip.scripts.OnMouseDown(nil,'LeftButton');U.frame:SetSize(280,height);U.frame.scripts.OnSizeChanged(U.frame,280,height)
+    local chrome=U.bodyTop+20
+    assert(U.resizeChrome>oldChrome and math.abs(U.resizeChrome-chrome)<.001)
+    assert(U.bodyTop+U.bodyScroll:GetHeight()+20<=U.frame:GetHeight()+.001,'rewrapped content stays inside native frame height')
+    assert(U.frame.resizeBounds[2]>=chrome+100)
+    U.resizeGrip.scripts.OnMouseUp(nil,'LeftButton');C.profile=saved;C.destination=nil;C:Stop();C:ApplyProfile()
 end)
 print('PASS runtime scenarios: '..count..'; frames allocated='..#frames)

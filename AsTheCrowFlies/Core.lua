@@ -60,6 +60,14 @@ function C:ApplyProfile()
     if not self.readOnly then AsTheCrowFliesDB=self.profile end
     self:RefreshAppearance(true)
 end
+function C:SetRouteOrder(value)
+    if value~="distance" and value~="time" then return false end
+    if self.profile.routeOrder==value then return true end
+    self.profile.routeOrder=value
+    if #self.results>0 then self:Plan() end
+    self:ApplyProfile()
+    return true
+end
 function C:ShowPanel(show)
     self.hidden=not show;if show then self.tucked=false end
     if N.UI.menu then N.UI.menu:Hide() end
@@ -107,6 +115,24 @@ function C:Choose(p,origin)
 end
 function C:Enter()
     if self.matches and self.matches[self.highlight or 1] then self:Choose(self.matches[self.highlight or 1],self.searchOrigin);return "selected" end
+    self:Plan()
+    return "planned"
+end
+function C:PrimaryActionLabel()
+    if self.searchOrigin and (self.matches~=nil or self.searching) then return "Use origin" end
+    if not self.destination and M.HasFilter(self.filter) then return "Compare matches" end
+    return "Find routes"
+end
+function C:PrimaryAction()
+    if self.searching then return end
+    if self.searchOrigin and self.matches~=nil then
+        local origin=self.matches[self.highlight or 1]
+        self.status=nil
+        if origin then self:Choose(origin,true);return "selected" end
+        self:Refresh();return
+    end
+    if not self.destination and M.HasFilter(self.filter) then self:Plan();return "planned" end
+    if self.matches and self.matches[self.highlight or 1] then self:Choose(self.matches[self.highlight or 1],false) end
     self:Plan()
     return "planned"
 end
