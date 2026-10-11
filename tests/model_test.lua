@@ -110,6 +110,16 @@ test('time shortlist includes farther NPC reached quickly through discovered fli
     for _,p in ipairs(selected) do assert(p.id~='far-trainer') end
 end)
 
+test('time shortlist cannot extend an authoritative offered itinerary',function()
+    local ns={[1]=pos(0,0,1),[2]=pos(10000,0,2),[3]=pos(20000,0,3)}
+    local data={nodes=ns,edges={{id='offered:71',timingKey='71',from=1,to=2,start=ns[1],finish=ns[2],mode='flight',distance=11000,offered=true},{id=72,from=2,to=3,start=ns[2],finish=ns[3],mode='flight',distance=11000}}}
+    local candidates={};for i=1,12 do candidates[#candidates+1]=pos(-1000-i,0,'direct'..i);candidates[#candidates+1]=pos(20000+i,0,'unoffered'..i) end
+    candidates[#candidates+1]=pos(10200,0,'good')
+    local c=M.Copy(ctx);c.routeOrder='time';c.taxiFrom=1;c.timings={['71']={10},['72']={10}}
+    local selected=R.Candidates(pos(0),candidates,data,c,12);local plans=R.Plan(pos(0),selected,data,c)
+    assert(plans[1].destination.id=='good')
+end)
+
 test('quality and ETA remain separate; immutable input',function()
     local e=edge(8,3,4,1000);local r=R.Summary({e},pos(1100),{timings={['8']={50}},speed=7,flightPrior=20})
     assert(r.eta==50 and r.legs[1].seconds==50 and e.seconds==nil)

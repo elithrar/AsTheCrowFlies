@@ -87,7 +87,7 @@ function R.Candidates(origin,candidates,data,ctx,limit)
     local function add(p) if not seen[p.id] then seen[p.id]=true;out[#out+1]=p end end
     for i=1,limit do add(ordered[i]) end
     if ctx.routeOrder=="time" then
-        local times,done,adj={},{},{}
+        local times,terminalTimes,done,adj={},{},{},{}
         for id,p in pairs(data.nodes or {}) do
             local known=ctx.known[id];local distance=M.Distance(origin,p)
             if known and known.state=="known" and M.Allowed(p,ctx) and distance then times[id]=distance/(ctx.speed or 7) end
@@ -98,8 +98,14 @@ function R.Candidates(origin,candidates,data,ctx,limit)
         while true do
             local u,best;for id,value in pairs(times) do if not done[id] and (not best or value<best) then u,best=id,value end end
             if not u then break end;done[u]=true
-            for _,e in ipairs(adj[u] or {}) do local value=best+R.Seconds(e,ctx);if value<times[e.to] then times[e.to]=value end end
+            for _,e in ipairs(adj[u] or {}) do
+                local value=best+R.Seconds(e,ctx)
+                if e.offered and ctx.taxiFrom==e.from then
+                    terminalTimes[e.to]=math.min(terminalTimes[e.to] or math.huge,value)
+                elseif value<times[e.to] then times[e.to]=value end
+            end
         end
+        for id,value in pairs(terminalTimes) do times[id]=math.min(times[id],value) end
         local estimate={}
         for _,p in ipairs(ordered) do
             local best=direct(p)/(ctx.speed or 7)
