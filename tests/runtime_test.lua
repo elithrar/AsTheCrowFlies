@@ -411,6 +411,10 @@ test('bounded trainer results retain width across compact state and reflow profi
     local route=N.Routes.Summary({{mode='walk',start=p,finish=goal,distance=500,quality='bearing'}},goal,C:Context())
     C.filter={categories={class=true},classes={MAGE=true},professions={}};C.results={route,route,route};C.matches=nil;C.nav.route=route;C.nav.leg=1;C.nav.state='walking';C.profile.scale=1.6
     local measurements={};for i,row in ipairs(U.rows) do measurements[i]=row.detail.GetStringHeight;row.detail.GetStringHeight=function() return 999 end end
+    C.nav.route=nil;C.compact=false;C.status=nil;C:Refresh()
+    assert(not U.go:IsShown() and not U.stop:IsShown() and not U.fold:IsShown())
+    assert(U.frame:GetHeight()==125+U.body:GetHeight()+8,'results without footer controls retain only bottom padding')
+    C.nav.route=route
     UIParent:SetSize(1280,720)
     for _,width in ipairs({280,320}) do
         C.profile.width=width;C.compact=false;C.status='A route status';C:Refresh()
@@ -428,11 +432,17 @@ test('bounded trainer results retain width across compact state and reflow profi
 end)
 
 test('open options follows display changes and closes pending confirmation and focus',function()
-    local O=N.Options;O:Open();O:Page(true);O.name:SetFocus();O.confirm='reset'
+    local O=N.Options;O:Open();O.optionsTab.scripts.OnClick()
+    assert(O.optionsTab.activeLine:IsShown() and not O.profilesTab.activeLine:IsShown() and O.appearance:IsShown())
+    O.profilesTab.scripts.OnClick()
+    assert(not O.optionsTab.activeLine:IsShown() and O.profilesTab.activeLine:IsShown() and O.profilePage:IsShown())
+    assert(O.profilesTab.activeLine.color[1]==C.profile.colors.accent[1])
+    O.name:SetFocus();O.confirm='reset'
     UIParent:SetSize(600,400);O.frame.scripts.OnEvent(O.frame,'DISPLAY_SIZE_CHANGED')
     assert(O.frame:GetWidth()*O.frame:GetScale()<=600 and O.frame:GetHeight()*O.frame:GetScale()<=400)
     O.frame:Hide();assert(not O.confirm and not O.name:HasFocus())
     O:Open();assert(O.frame:IsShown() and not O.confirm and O.reset.text:GetText()=='Reset active profile')
+    assert(O.profilesTab.activeLine:IsShown() and not O.optionsTab.activeLine:IsShown())
     UIParent:SetSize(1920,1080);O.frame.scripts.OnEvent(O.frame,'UI_SCALE_CHANGED');assert(O.frame:GetScale()==1);O.frame:Hide()
 end)
 

@@ -11,6 +11,10 @@ function O:Create(c)
     self.close=U:Button(f,"x",580,-12,24,24,function() f:Hide();self:CloseColor() end);self.close:SetFrameLevel(drag:GetFrameLevel()+2)
     self.optionsTab=U:Button(f,"Options",20,-44,86,26,function() self:Page(false) end)
     self.profilesTab=U:Button(f,"Profiles",112,-44,86,26,function() self:Page(true) end)
+    for _,tab in ipairs({self.optionsTab,self.profilesTab}) do
+        tab.activeLine=tab:CreateTexture(nil,"OVERLAY");tab.activeLine:SetHeight(2)
+        tab.activeLine:SetPoint("BOTTOMLEFT",tab,"BOTTOMLEFT",8,0);tab.activeLine:SetPoint("BOTTOMRIGHT",tab,"BOTTOMRIGHT",-8,0)
+    end
     self.appearance=CreateFrame("Frame",nil,f);self.appearance:SetAllPoints()
     self.profilePage=CreateFrame("Frame",nil,f);self.profilePage:SetAllPoints()
     local function section(parent,label,x,y,w,h)
@@ -116,13 +120,15 @@ end
 function O:Refresh()
     if not self.frame then return end
     local c=self.owner;local p=c.profile;self.font.value=p.font;self.font:SetDefaultText(p.font);self.scaleText:SetText(string.format("%.0f%%",p.scale*100))
+    for _,tab in ipairs({self.optionsTab,self.profilesTab}) do tab.activeLine:SetColorTexture(unpack(p.colors.accent)) end
+    self.optionsTab.activeLine:SetShown(not self.profilesSelected);self.profilesTab.activeLine:SetShown(self.profilesSelected==true)
     self.order.value=p.routeOrder;self.order:SetDefaultText(p.routeOrder=="time" and "Estimated time" or "Distance")
     self.overlays:SetChecked(p.overlays);self.locked:SetChecked(p.locked);self.active.value=c.profiles.active;self.active:SetDefaultText(c.profiles.active)
     self.copy.text:SetText(self.confirm=="copy" and "Confirm copy" or "Copy settings");self.reset.text:SetText(self.confirm=="reset" and "Confirm reset" or "Reset active profile");self.cancel:SetShown(self.confirm~=nil)
     for key,button in pairs(self.colors) do button.swatch:SetColorTexture(unpack(p.colors[key])) end
 end
 function O:Page(profiles)
-    self.confirm=nil;self.appearance:SetShown(not profiles);self.profilePage:SetShown(profiles);self:Refresh()
+    self.confirm=nil;self.profilesSelected=profiles==true;self.appearance:SetShown(not profiles);self.profilePage:SetShown(profiles);self:Refresh()
 end
 function O:Open()
     if N.UI.menu then N.UI.menu:Hide() end

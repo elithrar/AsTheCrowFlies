@@ -1,6 +1,6 @@
 # Validation and acceptance status
 
-This is a development candidate, not a supported live release. No in-game behavior was observed in this task. The reported computer-use runtime failure (`HRESULT 0x80070003`) remains a live-validation blocker. Installation into the verified Forever AddOns directory was explicitly authorized and file-verified; installation is not proof of native rendering or live routing. SavedVariables and unrelated addons were not changed.
+This is a development candidate, not a supported live release. No in-game behavior was observed in this task. The reported computer-use runtime failure (`HRESULT 0x80070003`) remains a live-validation blocker. An earlier build was installed and file-verified. The latest development package is ready separately; replacing the live addon remains paused pending fresh explicit approval after automatic review rejected the installation attempt. Installation is not proof of native rendering or live routing. SavedVariables and unrelated addons were not changed.
 
 ## Completed offline work
 

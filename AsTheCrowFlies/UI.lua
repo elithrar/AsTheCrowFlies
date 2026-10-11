@@ -299,7 +299,8 @@ function U:Refresh(c)
         local footer=y+(message and 44 or 0)
         self.go:ClearAllPoints();self.go:SetPoint("TOPLEFT",c.nav.route and 74 or 14,-footer);self.stop:ClearAllPoints();self.stop:SetPoint("TOPLEFT",c.profile.width-66,-footer)
         self.fold:ClearAllPoints();self.fold:SetPoint("TOPLEFT",14,-footer)
-        self.go.text:SetText("Find routes");self.frame:SetHeight(expanded and (footer+42) or 129)
+        local hasFooter=self.go:IsShown() or self.stop:IsShown() or self.fold:IsShown()
+        self.go.text:SetText("Find routes");self.frame:SetHeight(expanded and (footer+(hasFooter and 42 or 8)) or 129)
     end
     self:Layout(c)
 end
