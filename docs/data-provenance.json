@@ -1,0 +1,183 @@
+{
+  "build": "1.60.1.70338",
+  "buildKey": "f6e309c700cea095978aeb5d85210df4",
+  "product": "wow_classic_beta",
+  "readerSHA256": "73071f4089de9bc076ce825edf5b8e35154f3b64cfe79e0206221f0d4ddd7736",
+  "listfileSHA256": "9550c5d40606ec79ed43ab3762a4da4132be30ed9ba34572569b4e39e748c840",
+  "tables": {
+    "TaxiPathNode": {
+      "fileDataID": 1000437,
+      "readable": true,
+      "sha256": "a692e7a43973397f7b1655c486cf065927b1efb854934b52d042039946d2f6f9"
+    },
+    "TaxiPath": {
+      "fileDataID": 1067802,
+      "readable": true,
+      "sha256": "450c2bc30585e774b83f90b6a3fb3b702d5a9fc92d1a6a7b9a110391f356ec72"
+    },
+    "TaxiNodes": {
+      "fileDataID": 1068100,
+      "readable": true,
+      "sha256": "93c616b826ca1919b180176f84cac6359ec5f70f3e5b714b762711c9e4afa79c"
+    },
+    "AreaTable": {
+      "fileDataID": 1353545,
+      "readable": false,
+      "sha256": null
+    },
+    "UiMap": {
+      "fileDataID": 1957206,
+      "readable": true,
+      "sha256": "06a6cd6a84a725c508f77e4f5e60069f80c745a23cbbe15e9aed8c874e7008e0"
+    },
+    "UiMapAssignment": {
+      "fileDataID": 1957219,
+      "readable": true,
+      "sha256": "89743329493cef4aa7e2ffd3bc5a6056e4fd7059087300a1f4f77cd87ceeb687"
+    }
+  },
+  "decoded": {
+    "TaxiNodes": {
+      "sourceRowCount": 100,
+      "layoutHash": "E7B597F0",
+      "schemaSha256": "e612e442c0c12bc63e4729afb43928bdfb852f0bbddfa338a2c3a420cad5d76d",
+      "schemaCommit": "07d008f28907c00827cacadf2d7c1a40f578b6a3"
+    },
+    "TaxiPath": {
+      "sourceRowCount": 328,
+      "layoutHash": "A303DE51",
+      "schemaSha256": "9132dab66a0400b7b4d1e2cea6e81bc8e8b26fb6d1d376cd8fe6c5dceaf18e1f",
+      "schemaCommit": "07d008f28907c00827cacadf2d7c1a40f578b6a3"
+    },
+    "TaxiPathNode": {
+      "sourceRowCount": 10778,
+      "layoutHash": "FE362E70",
+      "schemaSha256": "d901920aeee41087cf1b887a0f3876b747f00be48c32767ef015061cbafc359a",
+      "schemaCommit": "07d008f28907c00827cacadf2d7c1a40f578b6a3"
+    },
+    "UiMap": {
+      "sourceRowCount": 60,
+      "layoutHash": "DB51D55F",
+      "schemaSha256": "8a982966fe3632bb13bf72bae7518da5eec7e3f6c2bc050163ef17baf7351931",
+      "schemaCommit": "07d008f28907c00827cacadf2d7c1a40f578b6a3"
+    },
+    "UiMapAssignment": {
+      "sourceRowCount": 61,
+      "layoutHash": "C9CC8DFB",
+      "schemaSha256": "8ba60a422392f29117ccf9a7353f83280f5cca64a87855efb90bce4a5a926fd4",
+      "schemaCommit": "07d008f28907c00827cacadf2d7c1a40f578b6a3"
+    }
+  },
+  "candidateNodes": 98,
+  "candidateEdges": 302,
+  "excluded": [
+    {
+      "id": 241,
+      "reason": "spline continent transition"
+    },
+    {
+      "id": 285,
+      "reason": "cross-continent transition"
+    },
+    {
+      "id": 292,
+      "reason": "spline continent transition"
+    },
+    {
+      "id": 293,
+      "reason": "spline continent transition"
+    },
+    {
+      "id": 295,
+      "reason": "spline continent transition"
+    },
+    {
+      "id": 301,
+      "reason": "cross-continent transition"
+    },
+    {
+      "id": 302,
+      "reason": "cross-continent transition"
+    },
+    {
+      "id": 303,
+      "reason": "cross-continent transition"
+    },
+    {
+      "id": 312,
+      "reason": "unsupported/missing endpoint"
+    },
+    {
+      "id": 313,
+      "reason": "unsupported/missing endpoint"
+    },
+    {
+      "id": 314,
+      "reason": "unsupported/missing endpoint"
+    },
+    {
+      "id": 383,
+      "reason": "unsupported/missing endpoint"
+    },
+    {
+      "id": 436,
+      "reason": "unresolved spline event/flag/delay"
+    },
+    {
+      "id": 472,
+      "reason": "unsupported/missing endpoint"
+    },
+    {
+      "id": 9669,
+      "reason": "unsupported/missing endpoint"
+    },
+    {
+      "id": 10538,
+      "reason": "unsupported/missing endpoint"
+    },
+    {
+      "id": 10641,
+      "reason": "unsupported/missing endpoint"
+    },
+    {
+      "id": 11078,
+      "reason": "unsupported/missing endpoint"
+    },
+    {
+      "id": 11167,
+      "reason": "unsupported/missing endpoint"
+    },
+    {
+      "id": 11350,
+      "reason": "unsupported/missing endpoint"
+    },
+    {
+      "id": 11391,
+      "reason": "unsupported/missing endpoint"
+    },
+    {
+      "id": 11398,
+      "reason": "unsupported/missing endpoint"
+    },
+    {
+      "id": 11457,
+      "reason": "unsupported/missing endpoint"
+    },
+    {
+      "id": 11520,
+      "reason": "unsupported/missing endpoint"
+    },
+    {
+      "id": 11616,
+      "reason": "unsupported/missing endpoint"
+    },
+    {
+      "id": 11669,
+      "reason": "unsupported/missing endpoint"
+    }
+  ],
+  "payloadSHA256": "b9ad792671e87fa9a15f3fd5a20daacde1999fe577769cdc885cc3b649d058a6",
+  "hotfixes": "Not applied: candidate-only graph; runtime offered-itinerary validation required",
+  "rights": "Local development payload only; no redistribution license inferred",
+  "groundCorridors": 0
+}

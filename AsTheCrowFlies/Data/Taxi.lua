@@ -1,0 +1,2 @@
+-- The source package intentionally carries no Blizzard-derived payload.
+-- tools/package.py --local-data replaces this with the locally extracted graph.

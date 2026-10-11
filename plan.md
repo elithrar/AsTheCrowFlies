@@ -1,6 +1,6 @@
 # AsTheCrowFlies: product and implementation plan
 
-Status: planning only. No addon implementation, extracted taxi/NPC payload, or in-game validation is included in this repository yet.
+Status update, 11 October 2026: the initial development implementation is now present. This document preserves the original product contract and research snapshot below. See `docs/VALIDATION.md` for current milestone completion and open live/data gates, and `docs/COVERAGE.md` for measured coverage. In-game validation remains unperformed; no verified ground corridors are supplied.
 
 Research snapshot: 10 October 2026. Initial target: official World of Warcraft: Forever 1.60.1, build 70338, Interface 16001. Recheck the build before implementation and each release.
 
