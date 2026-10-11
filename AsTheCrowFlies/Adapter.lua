@@ -6,6 +6,23 @@ function A.Call(fn,...)
     if type(fn)~="function" then return nil end
     local ok,a,b,c,d=pcall(fn,...);if ok then return a,b,c,d end
 end
+function A.InteractionNPCID()
+    -- The interaction unit identifies the opened NPC, independently of target.
+    local guid=A.Call(UnitGUID,"npc")
+    if not A.Ordinary(guid) or type(guid)~="string" then return nil end
+    local kind=guid:match("^([^-]+)%-")
+    if kind~="Creature" and kind~="Vehicle" then return nil end
+    local getter=C_CreatureInfo and C_CreatureInfo.GetCreatureID
+    local id
+    if type(getter)=="function" then
+        id=A.Call(getter,guid)
+    else
+        -- Older clients lack the getter. Accept only the complete NPC GUID
+        -- shape; an available getter's error or restricted result stays closed.
+        id=tonumber(guid:match("^[^-]+%-%d+%-%d+%-%d+%-%d+%-(%d+)%-%x+$"))
+    end
+    if A.Number(id) and id>0 and id==math.floor(id) then return id end
+end
 function A.XY(v)
     if not v or not A.Ordinary(v) then return nil end
     local x,y=A.Call(v.GetXY,v)
@@ -26,9 +43,44 @@ function A.Position()
     return A.FromMap(id,x,y)
 end
 function A.Project(p,id,allowOutside)
-    if not M.Position(p) or not A.Number(id) or not C_Map or not CreateVector2D then return nil end
-    local map,v=A.Call(C_Map.GetMapPosFromWorldPos,p.map,CreateVector2D(p.x,p.y),id)
-    local x,y=A.XY(v);if map==id and x and (allowOutside or (x>=0 and x<=1 and y>=0 and y<=1)) then return x,y end
+    if not M.Position(p) or not A.Number(id) or id<=0 then return nil end
+    local function bounded(x,y)
+        if A.Number(x) and A.Number(y) and (allowOutside or (x>=0 and x<=1 and y>=0 and y<=1)) then return x,y end
+    end
+    -- FromMap retains an authoritative map position. The optional inverse can
+    -- return nothing even when this original city/zone position is available.
+    local mapped=A.Number(p.uiMapID) and p.uiMapID>0 and A.Number(p.mx) and A.Number(p.my)
+        and p.mx>=0 and p.mx<=1 and p.my>=0 and p.my<=1
+    if mapped and p.uiMapID==id then return p.mx,p.my end
+    if not C_Map then return nil end
+    if CreateVector2D then
+        local map,v=A.Call(C_Map.GetMapPosFromWorldPos,p.map,CreateVector2D(p.x,p.y),id)
+        local x,y=A.XY(v)
+        if A.Number(map) and map==id and x then return bounded(x,y) end
+    end
+    if not mapped then return nil end
+    -- Only project known map positions upwards through native parent links.
+    -- Compose direct-parent rectangles so stitched world maps need no invented
+    -- world-coordinate transform, and sibling maps/floors cannot be confused.
+    local chain,seen={},{};local child=p.uiMapID
+    for _=1,16 do
+        if seen[child] then return nil end;seen[child]=true
+        local info=A.Call(C_Map.GetMapInfo,child)
+        if not A.Ordinary(info) or type(info)~="table" then return nil end
+        local parent=info.parentMapID
+        if not A.Number(parent) or parent<=0 or seen[parent] then return nil end
+        chain[#chain+1]={child,parent}
+        if parent==id then
+            local x,y=p.mx,p.my
+            for _,link in ipairs(chain) do
+                local minX,maxX,minY,maxY=A.Call(C_Map.GetMapRectOnMap,link[1],link[2])
+                if not A.Number(minX) or not A.Number(maxX) or not A.Number(minY) or not A.Number(maxY) or maxX<=minX or maxY<=minY then return nil end
+                x=minX+x*(maxX-minX);y=minY+y*(maxY-minY)
+            end
+            return bounded(x,y)
+        end
+        child=parent
+    end
 end
 function A.Context(previous)
     local _,class=A.Call(UnitClass,"player");local faction=A.Call(UnitFactionGroup,"player")

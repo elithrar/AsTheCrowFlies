@@ -60,7 +60,7 @@ function O:Create(c)
     self.appearance=CreateFrame("Frame",nil,content);self.appearance:SetAllPoints()
     self.profilePage=CreateFrame("Frame",nil,content);self.profilePage:SetAllPoints()
     local page=self.appearance
-    self:Section(page,"Appearance",16,-80,288,278)
+    self:Section(page,"Appearance",16,-80,288,250)
     self:Section(page,"Navigation",316,-80,288,168)
     self:Section(page,"Position",316,-272,288,191)
     self:Label(page,"Font",28,-105)
@@ -87,9 +87,9 @@ function O:Create(c)
     end)
     self:Label(page,"50–160%",28,-264,260,11,{.65,.65,.68})
     self.colors={}
-    for i,entry in ipairs({{"Background","background"},{"Accent","accent"},{"Text","text"}}) do
-        local key=entry[2];local x=28+((i-1)%2)*136;local y=i<3 and -306 or -334
-        local b=self:Button(page,entry[1],x,y,124,function() self:Color(key) end)
+    for i,entry in ipairs({{"Background","background"},{"Text","text"}}) do
+        local key=entry[2];local x=28+(i-1)*136
+        local b=self:Button(page,entry[1],x,-306,124,function() self:Color(key) end)
         self.bounded[#self.bounded]=nil;self:Bound(b.text,90,20,"LEFT",b,"LEFT",27,0)
         b.swatch=b:CreateTexture(nil,"OVERLAY");b.swatch:SetPoint("LEFT",b,"LEFT",7,0);b.swatch:SetSize(12,12);self.colors[key]=b
     end
@@ -114,7 +114,7 @@ function O:Create(c)
     self.togglePanel=self:Button(page,"Expand / tuck",464,-414,124,function() U:Toggle(c) end)
     self.showPanel=self:Button(page,"Show panel",328,-442,124,function() c:ShowPanel(true) end)
     self.hidePanel=self:Button(page,"Hide panel",464,-442,124,function() c:ShowPanel(false) end)
-    local fontHint=self:Label(page,"Font size changes the island text. Scale changes the whole island.",28,-386,260,11,{.7,.7,.72});fontHint:SetWordWrap(true);fontHint:SetHeight(36)
+    local fontHint=self:Label(page,"Font size changes the island text. Scale changes the whole island.",28,-358,260,11,{.7,.7,.72});fontHint:SetWordWrap(true);fontHint:SetHeight(36)
     local profiles=self.profilePage;self:Section(profiles,"Profiles",16,-80,588,340)
     self:Label(profiles,"Active profile",28,-108)
     self.active=self:Dropdown(profiles,28,-130,260,"Default",function() return self:ProfileEntries() end,function(name) self:ProfileAction("SwitchProfile",name) end)

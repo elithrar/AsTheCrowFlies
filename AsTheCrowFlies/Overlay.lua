@@ -1,8 +1,15 @@
 local _,N=...;local M,A=N.Model,N.Adapter;local O={};N.Overlay=O
+function O:MarkerIcon(texture,arrow)
+    if arrow then N.UI:NavigationArrow(texture)
+    else
+        texture:SetTexture("Interface\\AddOns\\AsTheCrowFlies\\Media\\eagle.tga");texture:SetTexCoord(0,1,0,1)
+        texture:SetDesaturated(false);texture:SetRotation(0);texture:SetVertexColor(.88,.66,.16);texture.atcfArrowAsset=nil
+    end
+end
 function O:Create()
     if Minimap then
         self.mini=CreateFrame("Frame",nil,Minimap);self.mini:SetSize(18,18);self.mini:SetFrameLevel(Minimap:GetFrameLevel()+8);self.mini:EnableMouse(true)
-        self.icon=self.mini:CreateTexture(nil,"OVERLAY");self.icon:SetAllPoints();self.icon:SetTexture("Interface\\AddOns\\AsTheCrowFlies\\Media\\arrow.tga");self.icon:SetVertexColor(.78,.85,.61);self.mini:Hide()
+        self.icon=self.mini:CreateTexture(nil,"OVERLAY");self.icon:SetAllPoints();self:MarkerIcon(self.icon,true);self.miniMode="arrow";self.mini:Hide()
         self.mini:SetScript("OnEnter",function() GameTooltip:SetOwner(self.mini,"ANCHOR_RIGHT");GameTooltip:SetText(self.mini.caption or "Destination");GameTooltip:Show() end)
         self.mini:SetScript("OnLeave",function() GameTooltip:Hide() end)
     end
@@ -45,14 +52,16 @@ function O:FlightPaths(route,canvas,mapID)
     end end
     self.visibleSegments=used
 end
-function O:MapPin(field,canvas)
+function O:MapPin(field,canvas,arrow)
     if not self[field] then
         local f=CreateFrame("Frame",nil,canvas);f:SetSize(18,18);f:SetFrameLevel(canvas:GetFrameLevel()+20);f:EnableMouse(true)
-        local t=f:CreateTexture(nil,"OVERLAY");t:SetAllPoints();t:SetTexture("Interface\\AddOns\\AsTheCrowFlies\\Media\\"..(field=="map" and "arrow.tga" or "eagle.tga"))
-        if field=="map" then t:SetVertexColor(.78,.85,.61) else t:SetVertexColor(.88,.66,.16) end;self[field]=f
+        f.icon=f:CreateTexture(nil,"OVERLAY");f.icon:SetAllPoints();self[field]=f
         f:SetScript("OnEnter",function() GameTooltip:SetOwner(f,"ANCHOR_RIGHT");GameTooltip:SetText(f.caption or "Destination");GameTooltip:Show() end);f:SetScript("OnLeave",function() GameTooltip:Hide() end)
     end
-    return self[field]
+    local pin=self[field]
+    if pin.arrow~=arrow then self:MarkerIcon(pin.icon,arrow);pin.arrow=arrow end
+    pin:SetFrameLevel(canvas:GetFrameLevel()+20)
+    return pin
 end
 function O:Update(c,p,ctx)
     ctx=ctx or {};local visible={}
@@ -74,8 +83,7 @@ function O:Update(c,p,ctx)
                 local x,y=M.Minimap(east,north,radius,Minimap:GetWidth(),Minimap:GetHeight(),shape)
                 if x then
                     local mode=active and "arrow" or "eagle"
-                    if self.miniMode~=mode then self.icon:SetTexture("Interface\\AddOns\\AsTheCrowFlies\\Media\\"..mode..".tga");self.miniMode=mode end
-                    if active then self.icon:SetVertexColor(unpack(c.profile.colors and c.profile.colors.accent or {.78,.85,.61})) else self.icon:SetVertexColor(.88,.66,.16) end
+                    if self.miniMode~=mode then self:MarkerIcon(self.icon,active~=nil);self.miniMode=mode end
                     self.mini:ClearAllPoints();self.mini:SetPoint("CENTER",Minimap,"CENTER",x,y);self.icon:SetRotation(active and -math.atan2(east,north) or 0)
                     self.mini.caption=(active and "Next: " or "Destination: ")..(target.name or "Flight point");self.mini:Show();visible.mini=true
                 end
@@ -88,13 +96,23 @@ function O:Update(c,p,ctx)
     if c.profile.mapMarkers and destination and map and map:IsShown() and map.GetCanvas and map.GetMapID then
         local canvas=map:GetCanvas();local id=map:GetMapID()
         if canvas then
+            local zoom=A.Call(map.GetCanvasScale,map)
+            if not A.Number(zoom) or zoom<=0 then zoom=A.Call(canvas.GetScale,canvas) end
+            if not A.Number(zoom) or zoom<=0 then zoom=1 end
             local route=selected or (active and destination==active.destination and active)
             if route and canvas.CreateLine then self:FlightPaths(route,canvas,id);visible.paths=true end
             local entries={{field="destination",point=destination}}
             if active and direction and target and M.Distance(target,destination)~=0 then entries[#entries+1]={field="map",point=target} end
             for _,entry in ipairs(entries) do
                 local x,y=A.Project(entry.point,id)
-                if x then local pin=self:MapPin(entry.field,canvas);pin:ClearAllPoints();pin:SetPoint("CENTER",canvas,"TOPLEFT",x*canvas:GetWidth(),-y*canvas:GetHeight());pin.caption=(entry.field=="map" and "Next: " or "Destination: ")..(entry.point.name or "Flight point");pin:Show();visible[entry.field]=true end
+                if x then
+                    local arrow=active~=nil and (entry.field=="map" or entry.point==active.destination)
+                    local pin=self:MapPin(entry.field,canvas,arrow)
+                    -- Native map pins compensate for canvas zoom. Keep our
+                    -- marker readable without changing its normalized point.
+                    pin:SetScale(1/zoom);pin:ClearAllPoints();pin:SetPoint("CENTER",canvas,"TOPLEFT",x*canvas:GetWidth()*zoom,-y*canvas:GetHeight()*zoom)
+                    pin.caption=(entry.field=="map" and "Next: " or "Destination: ")..(entry.point.name or "Flight point");pin:Show();visible[entry.field]=true
+                end
             end
         end
     end
