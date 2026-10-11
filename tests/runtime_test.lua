@@ -1659,4 +1659,39 @@ test('map pins retain normalized position and readable size across zoom while na
     assert(O.icon.coords[1]==0 and O.icon.coords[2]==1 and O.icon.coords[3]==0 and O.icon.coords[4]==1 and not O.map:IsShown())
     canvas:SetScale(oldScale);WorldMapFrame.GetCanvasScale=mapScale;WorldMapFrame.GetMapID=mapID;WorldMapFrame:SetShown(shown);C.profile.mapMarkers=oldMap;C.profile.minimapMarkers=oldMini;C.destination=nil;C:Stop()
 end)
+test('Back dismisses filter menu header menu and options without stranding the timed arrival note',function()
+    local _,start,cleanup=arrivalFixture();N.Options.frame:Hide()
+    local dialogs={
+        {open=function() U.filterButton.menuOpen=true;U.filterButton:TriggerEvent('OnMenuOpen') end,shown=function() return U.filterButton:IsMenuOpen() end},
+        {open=function() U.settings.scripts.OnClick() end,shown=function() return U.menu:IsShown() end},
+        {open=function() N.Options:Open() end,shown=function() return N.Options.frame:IsShown() end},
+    }
+    for _,dialog in ipairs(dialogs) do
+        C:ShowPanel(true);start();assert(C:Arrive());local deadline=C.arrivalUntil
+        dialog.open();assert(dialog.shown() and U.note:IsShown() and U.note:GetText()=='Arrived!')
+        C:Back();assert(not dialog.shown() and C.arrivalUntil==deadline,'dismissing a dialog must leave the arrival expiration scheduled')
+        now=deadline+.1;C:Tick()
+        assert(not C.arrivalUntil and not U.note:IsShown() and U.frame:GetHeight()==139 and U.editor:IsShown() and not C.nav.route,'expiration restores the normal idle editor after any Back early return')
+    end
+    cleanup()
+end)
+test('taxi reconciliation replaces normalized coordinates together with their map and clears unavailable projections',function()
+    local _,_,cleanup=arrivalFixture();local taxi,inverse,info=A.Taxi,C_Map.GetMapPosFromWorldPos,C_Map.GetMapInfo
+    local player=A.Position();local node=N.Model.Copy(player);node.id=600;node.name='Reprojected master';node.category='flight';node.x=player.x+30;node.y=player.y+20
+    node.uiMapID=1455;node.mx=.9;node.my=.8;C.data.nodes[600]=node
+    A.Taxi=function() return {from=600,offers={}} end
+    local projected=0;local expectedX,expectedY=node.y/4000,node.x/2000
+    C_Map.GetMapPosFromWorldPos=function(continent,point,mapID)
+        local x,y=point:GetXY();assert(continent==node.map and x==node.x and y==node.y and mapID==player.uiMapID,'project the actual flight node rather than the nearby player')
+        projected=projected+1;return mapID,CreateVector2D(expectedX,expectedY)
+    end
+    C:TaxiOpened();assert(projected==1 and node.uiMapID==player.uiMapID and node.mx==expectedX and node.my==expectedY)
+    assert(node.mx~=player.mx and node.my~=player.my,'the observing player is not the precise destination coordinate')
+    local x,y=A.Project(node,player.uiMapID);assert(x==expectedX and y==expectedY and projected==1)
+    node.uiMapID=1455;node.mx=.9;node.my=.8
+    C_Map.GetMapPosFromWorldPos=function() return nil end;C_Map.GetMapInfo=function() return nil end
+    C:TaxiOpened();assert(node.uiMapID==player.uiMapID and node.mx==nil and node.my==nil,'a new map cannot retain the old map coordinate pair')
+    assert(not A.Project(node,player.uiMapID),'unavailable projection hides the pin instead of fabricating a stale-map position')
+    A.Taxi=taxi;C_Map.GetMapPosFromWorldPos=inverse;C_Map.GetMapInfo=info;cleanup()
+end)
 print('PASS runtime scenarios: '..count..'; frames allocated='..#frames)

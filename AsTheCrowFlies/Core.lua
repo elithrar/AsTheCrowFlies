@@ -81,10 +81,10 @@ function C:Edit(preserveNavigation)
     self.compact=false;self.results={};self:Refresh()
 end
 function C:Back()
-    self.arrivalUntil=nil
     if N.UI.filterButton and N.UI.filterButton:IsMenuOpen() then N.UI.filterButton:CloseMenu();return end
     if N.UI.menu and N.UI.menu:IsShown() then N.UI.menu:Hide();return end
     if N.Options.frame and N.Options.frame:IsShown() then N.Options.frame:Hide();return end
+    self.arrivalUntil=nil
     self.searchGeneration=self.searchGeneration+1;self.searching=nil;self.planned=nil;N.UI.from:ClearFocus();N.UI.to:ClearFocus();self.status=nil
     if self.compact then self.compact=false
     elseif #self.results>0 then self.results={};self.destination=nil;self:Search(self.query or "",false)
@@ -215,7 +215,9 @@ function C:TaxiOpened()
         self.taxi=nil;self:Reindex();if #self.results>0 then self:Plan() end
         self.status="Flight-master position could not be reconciled";self:Refresh();return
     end
-    node.uiMapID=p.uiMapID
+    -- Normalized coordinates belong to their map. Reproject the node itself
+    -- before changing that map; unavailable projection clears the old pair.
+    node.mx,node.my=A.Project(node,p.uiMapID);node.uiMapID=p.uiMapID
     -- An offered whole itinerary can include fly-through nodes the player has
     -- never discovered. Store it as one observed edge, never split its timing.
     local edges={};for _,edge in ipairs(self.data.edges) do if not edge.live then edges[#edges+1]=edge end end
