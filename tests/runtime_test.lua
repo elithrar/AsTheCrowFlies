@@ -8,6 +8,8 @@ function methods:SetHeight(h) self.h=h end
 function methods:SetResizable(value) self.resizable=value end
 function methods:SetResizeBounds(a,b,c,d) assert(a>0 and b>0 and c>=a and d>=b,'native resize bounds must be positive and ordered');self.resizeBounds={a,b,c,d} end
 function methods:StartSizing(point) self.sizing=point end
+function methods:StartMoving() self.moving=true end
+function methods:StopMovingOrSizing() self.moving=false;self.sizing=nil;self.stopped=(self.stopped or 0)+1 end
 function methods:GetWidth() return self.w or 304 end
 function methods:GetHeight() return self.h or 28 end
 function methods:SetScript(event,fn) self.scripts[event]=fn end
@@ -94,7 +96,7 @@ function methods:ClearFocus() self.focus=false end
 function methods:SetFocus() self.focus=true end
 function methods:SetChecked(v) self.checked=v end
 function methods:GetChecked() return self.checked end
-local noop={'SetAllPoints','SetShadowColor','SetShadowOffset','SetAutoFocus','SetMaxLetters','SetTextInsets','HighlightText','SetMovable','EnableMouse','SetClampedToScreen','RegisterForDrag','StartMoving','StopMovingOrSizing','EnableMouseWheel','SetOwner','SetDrawLayer'}
+local noop={'SetAllPoints','SetShadowColor','SetShadowOffset','SetAutoFocus','SetMaxLetters','SetTextInsets','HighlightText','SetMovable','EnableMouse','SetClampedToScreen','RegisterForDrag','EnableMouseWheel','SetOwner','SetDrawLayer'}
 for _,name in ipairs(noop) do methods[name]=function() end end
 function GetCursorPosition() return cursorX,cursorY end
 local function object(name)
@@ -637,6 +639,7 @@ test('edge selection and unlocked dragging tuck on the correct side without chan
     assert(not C.tucked and C.profile.dock=='right' and C.profile.x==x and C.profile.y==y,'locked drag is inert')
     local oldLeft=U.frame.GetLeft;C.profile.locked=false
     for _,side in ipairs({'left','right','none'}) do
+        if C.tucked then U.handle.scripts.OnMouseDown(U.handle,'LeftButton');U.handle.scripts.OnClick() end
         U.frame.GetLeft=function() return side=='left' and 8 or side=='right' and UIParent:GetWidth()/U.frame:GetScale()-C.profile.width-8 or 200 end
         U.header.scripts.OnDragStart();U.header.scripts.OnDragStop()
         assert(C.profile.dock==side and C.tucked==(side~='none') and C.nav==state)
@@ -984,6 +987,40 @@ test('profile frame layer updates panel and tab while menus remain above both',f
     C.profile=saved;C:ShowPanel(true);C:ApplyProfile()
 end)
 
+test('open options placement follows docking resizing and header drags including generated selections',function()
+    C:Stop();C:ShowPanel(true);local saved=N.Model.Copy(C.profile);local O=N.Options;local d=O.placement
+    local wasShown=O.frame:IsShown();local wasProfiles=O.profilesSelected;local left=U.frame.GetLeft
+    local setDefault,generate=d.SetDefaultText,d.GenerateMenu;local priorSelection=d.selectionText
+    d.SetDefaultText=function(self,value)
+        self.defaultText=value;self.label=self.selectionText or value;self.Text:SetText(self.label)
+    end
+    d.GenerateMenu=function(self)
+        self.generated=(self.generated or 0)+1;local selected={}
+        self.menu(self,{SetScrollMode=function() end,CreateRadio=function(_,label,isSelected)
+            if isSelected() then selected[#selected+1]=label end
+            return {AddInitializer=function() end}
+        end})
+        self.selectionText=selected[1];self.label=self.selectionText or self.defaultText;self.Text:SetText(self.label)
+    end
+    local function placement(value,caption)
+        assert(O.frame:IsShown() and d.value==value and d.Text:GetText()==caption,'open placement selector must reflect panel interactions')
+        local selected={};d.menu(d,{SetScrollMode=function() end,CreateRadio=function(_,label,isSelected)
+            if isSelected() then selected[#selected+1]=label end
+            return {AddInitializer=function() end}
+        end})
+        assert(#selected==1 and selected[1]==caption,'native radio selection matches the displayed placement')
+    end
+    C.profile.locked=false;C.profile.dock='none';C.destination=nil;C.matches=nil;C.query='';C:ApplyProfile();O:Open();O.optionsTab.scripts.OnClick()
+    placement('none','Free (dragged)');U:SetDock(C,'right',true);placement('right','Right screen edge')
+    U.handle.scripts.OnMouseDown(U.handle,'LeftButton');U.handle.scripts.OnClick();assert(not C.tucked)
+    U.resizeGrip.scripts.OnMouseDown(U.resizeGrip,'LeftButton');local height=U.frame:GetHeight()
+    U.frame:SetSize(260,height);U.frame.scripts.OnSizeChanged(U.frame,260,height);U.resizeGrip.scripts.OnMouseUp(U.resizeGrip,'LeftButton')
+    placement('none','Free (dragged)')
+    U.frame.GetLeft=function() return 8 end;U.header.scripts.OnDragStart();U.header.scripts.OnDragStop();placement('left','Left screen edge')
+    U.frame.GetLeft=left;d.SetDefaultText=setDefault;d.GenerateMenu=generate;d.selectionText=priorSelection;d.atcfSelectionValue=nil
+    C.profile=saved;C:ShowPanel(true);C:ApplyProfile();O:Page(wasProfiles);if not wasShown then O.frame:Hide() end
+end)
+
 test('narrow large-font navigation wraps its header and footer without covering other controls',function()
     C:Stop();C:ShowPanel(true);local saved=N.Model.Copy(C.profile);local filter=C.filter;C.profile.width=220;C.profile.fontSize=18;C.profile.scale=1.6;C.profile.locked=false;C:ApplyProfile()
     local p=A.Position();local goal=N.Model.Copy(p);goal.id='narrow-nav';goal.name='A narrow destination';goal.x=p.x+500
@@ -1010,6 +1047,56 @@ test('header movement survives background refresh and saves release position wit
     U.header.scripts.OnDragStop();assert(not U.dragging and C.profile.x==420 and C.profile.y==-240 and C.profile.dock=='none' and not C.tucked)
     C:Refresh();assert(U.frame.point[4]==420 and U.frame.point[5]==-240)
     U.frame.GetLeft=left;U.frame.GetTop=top;for k,v in pairs(saved) do C.profile[k]=v end;C:ApplyProfile()
+end)
+
+test('header movement cancels immediately on hide lock or tuck without a stale release docking',function()
+    C:Stop();C:ShowPanel(true);local saved=N.Model.Copy(C.profile);local left,top=U.frame.GetLeft,U.frame.GetTop
+    C.destination=nil;C.matches=nil;C.query='';C.status=nil
+    U.frame.GetLeft=function() return 420 end;U.frame.GetTop=function() return UIParent:GetHeight()/U.frame:GetScale()-240 end
+    local function begin()
+        C.profile.locked=false;U:SetDock(C,'none',false);C:ShowPanel(true);U.header.scripts.OnDragStart()
+        assert(U.dragging and U.frame.moving)
+    end
+    begin();local stopped=U.frame.stopped or 0;C:ShowPanel(false)
+    assert(not U.dragging and not U.frame.moving and not U.frame:IsShown() and U.frame.stopped>stopped,'hide cancels native motion before layout can early-return')
+    U.header.scripts.OnDragStop();assert(not C.tucked and C.profile.dock=='none')
+    begin();stopped=U.frame.stopped;C.profile.locked=true;C:ApplyProfile()
+    assert(not U.dragging and not U.frame.moving and U.frame.stopped>stopped,'locking stops native movement immediately')
+    local x,y=C.profile.x,C.profile.y;U.header.scripts.OnDragStop();assert(C.profile.x==x and C.profile.y==y and not C.tucked)
+    begin();U:SetDock(C,'right',true)
+    assert(not U.dragging and not U.frame.moving and C.tucked and U.handle:IsShown() and not U.frame:IsShown())
+    U.header.scripts.OnDragStop();assert(C.profile.dock=='right' and C.tucked)
+    U.frame.GetLeft=left;U.frame.GetTop=top;C.profile=saved;C:ShowPanel(true);C:ApplyProfile()
+end)
+
+test('profile switch during a header drag preserves the replacement placement and layer',function()
+    C:Stop();C:ShowPanel(true);local profile,profiles=C.profile,C.profiles;local left,top=U.frame.GetLeft,U.frame.GetTop
+    C.profile=N.Model.Copy(profile);C.profile.locked=false;C.profile.dock='none';C.profile.scale=1;C.profile.strata='HIGH'
+    local after=N.Model.Copy(C.profile);after.x=91;after.y=-77;after.scale=.5;after.strata='LOW';after.width=220
+    C.profiles={version=1,active='BeforeDrag',profiles={BeforeDrag=C.profile,AfterDrag=after}};C:BindFilters();C:ApplyProfile()
+    U.frame.GetLeft=function() return 420 end;U.frame.GetTop=function() return UIParent:GetHeight()/U.frame:GetScale()-240 end
+    U.header.scripts.OnDragStart();assert(U.dragging and U.frame.moving)
+    assert(N.Options:ProfileAction('SwitchProfile','AfterDrag'));assert(not U.dragging and not U.frame.moving)
+    assert(C.profile.x==91 and C.profile.y==-77 and U.frame:GetScale()==.5 and U.frame:GetFrameStrata()=='LOW')
+    U.header.scripts.OnDragStop();assert(C.profile.x==91 and C.profile.y==-77 and C.profile.width==220,'late release cannot write into the newly selected profile')
+    U.frame.GetLeft=left;U.frame.GetTop=top;C.profile=profile;C.profiles=profiles;C:BindFilters();C:ShowPanel(true);C:ApplyProfile()
+end)
+
+test('geometry gestures cancel on display changes while routine font refresh keeps native control',function()
+    C:Stop();C:ShowPanel(true);local saved=N.Model.Copy(C.profile);local parentScale=UIParent:GetScale();local screenWidth,screenHeight=UIParent:GetWidth(),UIParent:GetHeight()
+    C.destination=nil;C.matches=nil;C.query='';C.status=nil;C.profile.locked=false;C.profile.scale=1.6;C.profile.width=240;U:SetDock(C,'none',false);C:ApplyProfile()
+    U.resizeGrip.scripts.OnMouseDown(U.resizeGrip,'LeftButton');assert(U.resizing and U.frame.sizing=='RIGHT')
+    C:RefreshAppearance(false);assert(U.resizing and U.frame.sizing=='RIGHT','ordinary font refresh must not end a resize')
+    UIParent:SetSize(900,320);C.events.scripts.OnEvent(nil,'DISPLAY_SIZE_CHANGED')
+    assert(not U.resizing and not U.frame.sizing and math.abs(U.frame:GetScale()-320/660)<.0001,'display shrink cancels native sizing and refits immediately')
+    local width=C.profile.width;U.resizeGrip.scripts.OnMouseUp(U.resizeGrip,'LeftButton');assert(C.profile.width==width)
+    UIParent:SetSize(screenWidth,screenHeight);C:ApplyProfile();U.header.scripts.OnDragStart();assert(U.dragging and U.frame.moving)
+    UIParent:SetScale(.8);C.events.scripts.OnEvent(nil,'UI_SCALE_CHANGED');assert(not U.dragging and not U.frame.moving)
+    UIParent:SetScale(parentScale);C:ApplyProfile();U.resizeGrip.scripts.OnMouseDown(U.resizeGrip,'LeftButton');assert(U.resizing)
+    C.profile=N.Model.Copy(C.profile);C.profile.width=220;C.profile.x=91;C.profile.y=-77;C:ApplyProfile()
+    assert(not U.resizing and not U.frame.sizing and C.profile.width==220 and C.profile.x==91 and C.profile.y==-77)
+    U.resizeGrip.scripts.OnMouseUp(U.resizeGrip,'LeftButton');assert(C.profile.x==91 and C.profile.y==-77)
+    C.profile=saved;UIParent:SetScale(parentScale);UIParent:SetSize(screenWidth,screenHeight);C:ShowPanel(true);C:ApplyProfile()
 end)
 
 test('navigation typography grows ten percent and compass stays world relative as arrow turns',function()

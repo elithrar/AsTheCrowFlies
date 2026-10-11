@@ -185,12 +185,20 @@ function O:Color(key)
         cancelFunc=function() if not owns() then return end;profile.colors[key]=original;self.colorEdit=nil;if c.profile==profile then c:ApplyProfile() end end})
     edit.opening=false
 end
+function O:RefreshPlacement()
+    local d=self.placement;if not d then return end
+    local dock=self.owner.profile.dock
+    d.value=dock;d:SetDefaultText(dock=="right" and "Right screen edge" or dock=="left" and "Left screen edge" or "Free (dragged)")
+    -- Generated selection text can override the fallback caption. Update only
+    -- this control when a completed panel gesture changes its saved placement.
+    if d.atcfSelectionValue~=dock then d:GenerateMenu();d.atcfSelectionValue=dock end
+end
 function O:Refresh(fontsReady)
     if not self.frame then return end
     if not fontsReady then self.owner:RefreshAppearance(false);return end
     local c=self.owner;local p=c.profile;self.refreshing=true;self.font.value=p.font;self.font:SetDefaultText(p.font)
     self.fontSize:SetText(tostring(p.fontSize));self.scale:SetValue(p.scale*100);self.scaleEdit:SetText(tostring(math.floor(p.scale*100+.5)))
-    self.placement.value=p.dock;self.placement:SetDefaultText(p.dock=="right" and "Right screen edge" or p.dock=="left" and "Left screen edge" or "Free (dragged)")
+    self:RefreshPlacement()
     self.strata.value=p.strata;self.strata:SetDefaultText(p.strata=="LOW" and "Low" or p.strata=="MEDIUM" and "Medium" or "High")
     self.optionsTab.activeLine:SetShown(not self.profilesSelected);self.profilesTab.activeLine:SetShown(self.profilesSelected==true)
     self.optionsTab.text:SetTextColor(unpack(not self.profilesSelected and {.93,.94,.97} or gold));self.profilesTab.text:SetTextColor(unpack(self.profilesSelected and {.93,.94,.97} or gold))

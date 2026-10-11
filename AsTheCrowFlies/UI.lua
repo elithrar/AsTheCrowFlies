@@ -224,8 +224,10 @@ function U:PauseIcon(c)
     self:Tip(self.pause,c.nav.state=="nearby" and "Confirm arrival" or c.manualPause and "Resume navigation" or "Pause navigation")
 end
 function U:SetDock(c,side,tuck)
+    self:FinishMove(c,false);self:FinishResize(c,false)
     self:FinishHandleDrag()
     c.profile.dock=(side=="left" or side=="right") and side or "none";c.tucked=tuck and c.profile.dock~="none" or false;c.hidden=false
+    N.Options:RefreshPlacement()
     self:Layout(c)
 end
 function U:HandleTravel()
@@ -288,11 +290,34 @@ function U:SavePlacement(c)
     local left,top=self.frame:GetLeft(),self.frame:GetTop()
     if left and top then c.profile.x=left;c.profile.y=top-UIParent:GetHeight()/self.frame:GetScale() end
 end
-function U:FinishResize(c)
+function U:GestureGeometry(c)
+    return {width=UIParent:GetWidth(),height=UIParent:GetHeight(),scale=UIParent:GetEffectiveScale(),profileScale=c.profile.scale}
+end
+function U:GeometryChanged(c,geometry)
+    return not geometry or geometry.width~=UIParent:GetWidth() or geometry.height~=UIParent:GetHeight()
+        or geometry.scale~=UIParent:GetEffectiveScale() or geometry.profileScale~=c.profile.scale
+end
+function U:FinishMove(c,save)
+    if not self.dragging then return end
+    self.dragging=false;self.frame:StopMovingOrSizing()
+    if save and self.moveProfile==c.profile then self:SavePlacement(c) end
+    self.moveProfile=nil;self.moveGeometry=nil;self.moveWidth=nil
+end
+function U:FinishResize(c,save)
     if not self.resizing then return end
     self.resizing=false;self.frame:StopMovingOrSizing()
-    if self.resizeProfile==c.profile then self:SavePlacement(c) end
-    self.resizeProfile=nil;self.resizeMode=nil
+    if save~=false and self.resizeProfile==c.profile then self:SavePlacement(c) end
+    self.resizeProfile=nil;self.resizeMode=nil;self.resizeGeometry=nil
+    N.Options:RefreshPlacement()
+end
+function U:CancelStaleGestures(c)
+    -- A native gesture belongs to its starting profile and coordinate system.
+    -- Cancel before layout so a hide, profile switch or display change can apply.
+    local unavailable=c.hidden or c.tucked or c.profile.locked
+    if self.dragging and (unavailable or self.moveProfile~=c.profile or self.moveWidth~=c.profile.width
+        or self:GeometryChanged(c,self.moveGeometry)) then self:FinishMove(c,false) end
+    if self.resizing and (unavailable or self.resizeProfile~=c.profile or self.resizeMode~=self:ResizeMode(c)
+        or self:GeometryChanged(c,self.resizeGeometry)) then self:FinishResize(c,false) end
 end
 function U:ResizeMode(c)
     local results=not (c.compact and c.nav.route) and (c.matches and #c.matches>0 or not c.matches and #c.results>0)
@@ -394,14 +419,16 @@ function U:Create(c)
     self.owner=c;local f=CreateFrame("Frame","AsTheCrowFliesPanel",UIParent);self.frame=f
     f:SetMovable(true);f:SetResizable(true);f:EnableMouse(true);f:SetClampedToScreen(true);f:SetFrameStrata(c.profile.strata);f:SetFrameLevel(100);self:Surface(f)
     local header=CreateFrame("Frame",nil,f);self.header=header;header:SetPoint("TOPLEFT");header:SetSize(c.profile.width-78,44);header:EnableMouse(true);header:RegisterForDrag("LeftButton")
-    header:SetScript("OnDragStart",function() if not c.profile.locked and not self.resizing then self.dragging=true;f:StartMoving() end end)
+    header:SetScript("OnDragStart",function()
+        if c.profile.locked or c.hidden or c.tucked or self.resizing then return end
+        self.moveProfile=c.profile;self.moveGeometry=self:GestureGeometry(c);self.moveWidth=c.profile.width;self.dragging=true;f:StartMoving()
+    end)
     header:SetScript("OnDragStop",function()
-        if not self.dragging then return end;self.dragging=false
-        f:StopMovingOrSizing()
-        local left,top=f:GetLeft(),f:GetTop();local scale=f:GetScale();local screen=UIParent:GetWidth()/scale
-        self:SavePlacement(c);c.profile.dock=left<24 and "left" or (left+c.profile.width>screen-24 and "right" or "none")
-        c.tucked=c.profile.dock~="none"
-        self:Layout(c)
+        self:CancelStaleGestures(c)
+        if not self.dragging then self:Layout(c);return end
+        self:FinishMove(c,true)
+        local left=f:GetLeft();local screen=UIParent:GetWidth()/f:GetScale()
+        self:SetDock(c,left<24 and "left" or (left+c.profile.width>screen-24 and "right" or "none"),true)
     end)
     local eagle=header:CreateTexture(nil,"ARTWORK");self.eagle=eagle;eagle:SetTexture(MEDIA.."eagle.tga");eagle:SetPoint("LEFT",header,"LEFT",14,0);eagle:SetSize(24,24);eagle:SetVertexColor(.88,.66,.16)
     self.title=self:Text(header,"AS THE CROW FLIES",11,46,0,184,24);self.title:ClearAllPoints();self.title:SetPoint("LEFT",header,"LEFT",46,0)
@@ -506,22 +533,21 @@ function U:Create(c)
     self:Tip(grip,"Drag to resize")
     grip:SetScript("OnMouseDown",function(_,button)
         if button~="LeftButton" or c.profile.locked or self.dragging or not grip:IsShown() then return end
-        self.resizeMode=self:ResizeMode(c);self.resizeProfile=c.profile
+        self.resizeMode=self:ResizeMode(c);self.resizeProfile=c.profile;self.resizeGeometry=self:GestureGeometry(c)
         self.resizeChrome=f:GetHeight()-self.bodyScroll:GetHeight();self.resizing=true
         self:SavePlacement(c);c.profile.dock="none";f:StartSizing(self.resizeMode=="results" and "BOTTOMRIGHT" or "RIGHT")
     end)
     grip:SetScript("OnMouseUp",function(_,button) if button=="LeftButton" and self.resizing then self:FinishResize(c);c:Refresh() end end)
-    grip:SetScript("OnHide",function() self:FinishResize(c) end)
+    grip:SetScript("OnHide",function() self:FinishResize(c,false) end)
     f:SetScript("OnSizeChanged",function(_,width,height)
         if not self.resizing or self.resizeLayout then return end
-        if self.resizeProfile~=c.profile or c.profile.locked then self:FinishResize(c);return end
+        self:CancelStaleGestures(c);if not self.resizing then return end
         c.profile.width=math.max(N.Settings.minWidth,math.min(N.Settings.maxWidth,width))
         if self.resizeMode=="results" then c.profile.resultsHeight=math.max(100,math.min(560,height-self.resizeChrome)) end
         self.resizeLayout=true;self:Refresh(c);self.resizeLayout=false
     end)
     f:SetScript("OnHide",function()
-        self:FinishResize(c)
-        if self.dragging then f:StopMovingOrSizing();self:SavePlacement(c);self.dragging=false end
+        self:FinishResize(c,false);self:FinishMove(c,false)
     end)
     self.from:SetText("Current location");self:Layout(c)
     local menu=CreateFrame("Frame","AsTheCrowFliesMenu",f);self.menu=menu;menu:SetPoint("TOPRIGHT",f,"TOPRIGHT",-8,-40);menu:SetSize(196,172);menu:SetFrameStrata("DIALOG");menu:SetFrameLevel(f:GetFrameLevel()+20);menu:EnableMouse(true);self:Surface(menu)
@@ -536,12 +562,13 @@ function U:Create(c)
     UISpecialFrames=UISpecialFrames or {};table.insert(UISpecialFrames,"AsTheCrowFliesMenu")
 end
 function U:Layout(c)
-    if self.resizing and (self.resizeProfile~=c.profile or c.profile.locked or self.resizeMode~=self:ResizeMode(c)) then self:FinishResize(c) end
+    self:CancelStaleGestures(c)
+    local f,p=self.frame,c.profile
+    f:SetFrameStrata(p.strata);self.handle:SetFrameStrata(p.strata)
     -- Native dragging owns the frame anchor until release. Refreshes during
     -- guidance, indexing or font registration must not snap it back.
     if self.dragging then return end
-    local f,p=self.frame,c.profile;local scale=self.resizing and f:GetScale() or math.min(p.scale,UIParent:GetHeight()/660,UIParent:GetWidth()/(p.width+16))
-    f:SetFrameStrata(p.strata);self.handle:SetFrameStrata(p.strata)
+    local scale=self.resizing and f:GetScale() or math.min(p.scale,UIParent:GetHeight()/660,UIParent:GetWidth()/(p.width+16))
     if not self.resizing then f:SetScale(scale);f:SetWidth(p.width);f:ClearAllPoints() end
     local function move(control,x,y) control:ClearAllPoints();control:SetPoint("TOPLEFT",x,y) end
     self.header:SetWidth(p.width-78);self.title:SetWidth(p.width-124)
@@ -590,7 +617,7 @@ function U:LayoutGuidance(c)
     local height=footer+actionHeight+22;local changed=self.frame:GetHeight()~=height;self.frame:SetHeight(height);return changed
 end
 function U:Refresh(c)
-    if self.resizing and (self.resizeProfile~=c.profile or c.profile.locked or self.resizeMode~=self:ResizeMode(c)) then self:FinishResize(c) end
+    self:CancelStaleGestures(c)
     if not self.dragging and not self.resizing then self.frame:SetScale(math.min(c.profile.scale,UIParent:GetHeight()/660,UIParent:GetWidth()/(c.profile.width+16))) end
     if self.menuLock then self.menuLock.text:SetText(c.profile.locked and "Unlock panel" or "Lock panel") end
     local compact=c.compact and c.nav.route~=nil
