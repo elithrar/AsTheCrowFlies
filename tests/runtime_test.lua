@@ -42,7 +42,9 @@ function methods:SetBackdrop(v) self.backdrop=v end
 function methods:SetBackdropColor(...) self.backdropColor={...} end
 function methods:SetBackdropBorderColor(...) self.borderColor={...} end
 function methods:GenerateMenu() self.generated=(self.generated or 0)+1 end
-function methods:CloseMenu() self.menuClosed=true;self.menuOpen=false end
+function methods:RegisterCallback(event,callback,owner) self.callbacks=self.callbacks or {};self.callbacks[event]={callback,owner} end
+function methods:TriggerEvent(event,...) local entry=self.callbacks and self.callbacks[event];if entry then entry[1](entry[2],...) end end
+function methods:CloseMenu() self.menuClosed=true;self.menuOpen=false;self:TriggerEvent('OnMenuClose') end
 function methods:IsMenuOpen() return self.menuOpen==true end
 function methods:GetUnboundedStringWidth()
     local longest=0;for line in ((self.text or '')..'\n'):gmatch('(.-)\n') do longest=math.max(longest,#line) end
@@ -132,6 +134,7 @@ C_Map={GetBestMapForUnit=function() return 1429 end,GetPlayerMapPosition=functio
     GetMapPosFromWorldPos=function(continent,v,id) local x,y=v:GetXY();return id or 1429,CreateVector2D(y/4000,x/2000) end,
     GetMapInfo=function(id) return {name='Elwynn',mapID=id} end}
 C_Minimap={GetViewRadius=function() return 100 end,IsRotateMinimapIgnored=function() return false end}
+C_Texture={GetAtlasInfo=function(name) if name=='gamepad-hud-icon-filter' then return {width=16,height=16} end end}
 C_TaxiMap={GetTaxiNodesForMap=function() return {{nodeID=1,faction=2,isUndiscovered=false},{nodeID=2,faction=2,isUndiscovered=true}} end}
 function TakeTaxiNode(slot) end
 function hooksecurefunc(name,fn) hooks[name]=fn end
@@ -557,19 +560,27 @@ test('minimal idle expands on typing and clear Escape Stop cancel queued searche
 end)
 test('native filter nested checkboxes support OR class defaults reset and repeated changes',function()
     C:BindFilters();C:Filter('all');flushSearch();local menu=filterDescription();assert(menu.scroll==280 and #menu.children==8 and menu.children[1].selected())
+    local d=U.filterButton;local icon=d.icons.filter.texture
+    assert(d.kind=='DropdownButton' and icon:GetAtlas()=='gamepad-hud-icon-filter' and icon.desaturated)
+    assert(icon:GetWidth()==18 and icon:GetHeight()==18 and d:GetWidth()==24 and d:GetHeight()==28 and not d.text:IsShown())
+    assert(icon.color[1]==1 and d.pushedTexture==d.nativePushed)
+    d.scripts.OnEnter();assert(d.bg.color[1]==d.hoverColor[1] and GameTooltip:GetText()=='Filter destinations')
+    d.menuOpen=true;d:TriggerEvent('OnMenuOpen');d.scripts.OnLeave();assert(d.bg.color[1]==d.hoverColor[1],'open menu retains its background after pointer leaves')
+    d:CloseMenu();assert(d.bg.color[1]==d.normalColor[1])
+    d.scripts.OnEnter();d.menuOpen=true;d:TriggerEvent('OnMenuOpen');d:CloseMenu();assert(d.bg.color[1]==d.hoverColor[1]);d.scripts.OnLeave()
     local classes=menu.children[3];assert(classes.label=='Class trainers' and classes.scroll==280 and #classes.children==10)
     classes.callback();flushSearch();assert(C.filter.categories.class and C.filter.classes.MAGE and classes.selected())
     menu.children[2].callback();flushSearch();assert(C.filter.categories.auction and C.filter.categories.class)
     classes.children[1].callback();flushSearch();assert(not next(C.filter.classes) and classes.children[1].selected())
     classes.children[2].callback();flushSearch();assert(C.filter.classes.WARRIOR)
     local professions=menu.children[4];professions.children[2].callback();flushSearch();assert(C.filter.professions.Alchemy and C.filter.categories.profession)
-    assert(U.filterLines[1].color[1]==C.profile.colors.accent[1])
+    assert(icon.color[1]==C.profile.colors.accent[1] and d.text.textColor[1]==C.profile.colors.accent[1])
     for _=1,4 do menu.children[2].callback();flushSearch() end;assert(C.filter.categories.auction)
     local fontString=object();classes.initializer({fontString=fontString});assert(fontString.fontObject==U.menuFont)
     U.to:SetFocus();U.filterButton.scripts.OnMouseDown();assert(not U.to:HasFocus())
     U.filterButton.menuOpen=true;C:Back();assert(not U.filterButton:IsMenuOpen())
     menu.children[1].callback();flushSearch();assert(not N.Model.HasFilter(C.filter) and not next(C.filter.classes) and not next(C.filter.professions))
-    assert(U.filterLines[1].color[1]==.65);C:Stop()
+    assert(icon.color[1]==1 and d.text.textColor[1]==1);C:Stop()
 end)
 test('filter OR reaches route planning and nested class subsets without cancelling navigation',function()
     local saved={destinations=C.destinations,data=C.data};C:Stop();C:BindFilters();C:Filter('all');flushSearch()
@@ -1073,7 +1084,7 @@ test('native icons keep atlas crops aspect ratio and font-independent pooled geo
     local old=C_Texture
     C_Texture={GetAtlasInfo=function(name) return {width=name=='common-icon-forwardarrow' and 40 or 20,height=20} end}
     local clicks=0;local button=U:Button(U.frame,'test',0,0,26,26,function() clicks=clicks+1 end)
-    for _,kind in ipairs({'cog','back','location','left','right'}) do U:Icon(button,kind) end
+    for _,kind in ipairs({'cog','back','location','filter','left','right'}) do U:Icon(button,kind) end
     assert(button.icons.back.asset=='common-icon-rotateleft' and button.icons.left.asset=='common-icon-backarrow')
     assert(button.icons.cog.texture:GetWidth()==20 and button.icons.location.asset=='Interface\\Minimap\\UI-Minimap-Ping-Center')
     local right=button.icons.right.texture
@@ -1082,7 +1093,7 @@ test('native icons keep atlas crops aspect ratio and font-independent pooled geo
     local allocated=#frames;local font=button.text:GetFont()
     for _,scale in ipairs({.5,.9,1,1.25,1.6}) do
         button:SetScale(scale)
-        for _,kind in ipairs({'cog','back','location','left','right'}) do
+        for _,kind in ipairs({'cog','back','location','filter','left','right'}) do
             U:Icon(button,kind);local icon=button.icons[kind]
             assert(icon.texture.desaturated and icon.texture.snap==false and icon.texture.snapBias==0)
             assert(icon:GetWidth()==20 and icon:GetHeight()==20 and icon.point[1]=='CENTER')
@@ -1122,6 +1133,7 @@ test('missing native artwork keeps a visible usable action and gear atlas fallba
     U:Icon(button,'location');assert(button.text:IsShown() and button.text:GetText()=='+' and not button.icons.location.texture:IsShown())
     button.scripts.OnClick();assert(clicks==1)
     C_Texture=nil;U:Icon(button,'back');assert(button.text:IsShown() and button.text:GetText()=='<')
+    U:Icon(button,'filter');assert(button.text:IsShown() and button.text:GetText()=='F' and not button.icons.filter.texture:IsShown())
     U:Icon(button,'cog');assert(not button.text:IsShown() and button.icons.cog.texture:IsShown())
     methods.SetTexture=setTexture;C_Texture=old
 end)

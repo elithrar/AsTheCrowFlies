@@ -159,6 +159,7 @@ local nativeIcons={
     cog={{file="Interface\\WorldMap\\GEAR_64GREY",width=64,height=64,size=20},{atlas="OptionsIcon-Brown",size=18}},
     back={{atlas="common-icon-rotateleft",size=18},{atlas="common-icon-backarrow",size=18},{file="Interface\\ChatFrame\\ChatFrameExpandArrow",width=16,height=16,size=20,flip=true}},
     location={{file="Interface\\Minimap\\UI-Minimap-Ping-Center",width=16,height=16,size=18}},
+    filter={{atlas="gamepad-hud-icon-filter",size=18}},
     left={{atlas="common-icon-backarrow",size=18},{file="Interface\\ChatFrame\\ChatFrameExpandArrow",width=16,height=16,size=20,flip=true}},
     right={{atlas="common-icon-forwardarrow",size=18},{file="Interface\\ChatFrame\\ChatFrameExpandArrow",width=16,height=16,size=20}},
 }
@@ -214,7 +215,7 @@ function U:Icon(b,kind)
     for name,icon in pairs(b.icons) do icon:SetShown(name==kind) end
     if nativeIcons[kind] and not b.icons[kind].nativeAvailable then
         -- An unexpected missing client asset must not leave an invisible action.
-        b.text:SetText(({cog="S",back="<",location="+",left="<",right=">"})[kind]);b.text:Show()
+        b.text:SetText(({cog="S",back="<",location="+",filter="F",left="<",right=">"})[kind]);b.text:Show()
     end
     b.iconKind=kind
 end
@@ -287,16 +288,17 @@ function U:Menu(parent,x,y,w,label,entries,choose)
     end)
     self.dropdowns=self.dropdowns or {};self.dropdowns[#self.dropdowns+1]=d;return d
 end
+function U:RefreshFilter(c)
+    local d=self.filterButton;local tint=M.HasFilter(c.filter) and c.profile.colors.accent or {1,1,1}
+    d.icons.filter.texture:SetVertexColor(tint[1],tint[2],tint[3],1);d.text:SetTextColor(unpack(tint))
+    d.bg:SetVertexColor(unpack((d.atcfHovered or d:IsMenuOpen()) and d.hoverColor or d.normalColor))
+end
 function U:FilterMenu(parent,c)
     -- The intrinsic DropdownButton owns mouse dismissal, Escape and menu input.
     local d=CreateFrame("DropdownButton",nil,parent);self.filterButton=d
-    d:SetPoint("TOPLEFT",c.profile.width-38,-42);d:SetSize(24,28);self:Rectangle(d,{.13,.14,.17,1})
-    self.filterLines={}
-    local points={{5,7},{19,7},{14,14},{14,21},{10,23},{10,14},{5,7}}
-    for i=1,#points-1 do
-        local line=d:CreateLine(nil,"ARTWORK");line:SetThickness(1.5)
-        line:SetStartPoint("TOPLEFT",d,points[i][1],-points[i][2]);line:SetEndPoint("TOPLEFT",d,points[i+1][1],-points[i+1][2]);self.filterLines[#self.filterLines+1]=line
-    end
+    d:SetPoint("TOPLEFT",c.profile.width-38,-42);d:SetSize(24,28)
+    d.bg=self:Rectangle(d,{.13,.14,.17,1});d.normalColor={.13,.14,.17,1};d.hoverColor={.22,.24,.28,1}
+    d.text=self:Text(d,"F",12,0,0,24,28);d.text:SetJustifyH("CENTER");self:Icon(d,"filter")
     if not self.menuFont then self.menuFont=CreateFont("AsTheCrowFliesMenuFont");self.menuFont.atcfFixedFont=true;self.menuFont.atcfOptions=true;self:Font(self.menuFont,12);self.menuFont:SetTextColor(unpack(ink)) end
     d:SetupMenu(function(_,root)
         root:SetScrollMode(280)
@@ -321,6 +323,10 @@ function U:FilterMenu(parent,c)
     end)
     d:HookScript("OnMouseDown",function() self.from:ClearFocus();self.to:ClearFocus() end)
     self:Tip(d,"Filter destinations")
+    d:HookScript("OnEnter",function() d.atcfHovered=true;self:RefreshFilter(c) end)
+    d:HookScript("OnLeave",function() d.atcfHovered=false;self:RefreshFilter(c) end)
+    d:RegisterCallback("OnMenuOpen",function() self:RefreshFilter(c) end,self)
+    d:RegisterCallback("OnMenuClose",function() self:RefreshFilter(c) end,self)
     self.dropdowns=self.dropdowns or {};self.dropdowns[#self.dropdowns+1]=d
     return d
 end
@@ -529,8 +535,7 @@ function U:Refresh(c)
     self.editor:SetShown(not compact);self.body:SetShown(not compact and expanded);self.bodyScroll:SetShown(not compact and expanded);self.guidance:SetShown(compact);self.expand:SetShown(compact);self.go:SetShown(not compact and expanded and (c.matches~=nil or #c.results==0));self.note:SetShown(not compact and expanded)
     self:ScrollIndicator(self.bodyScroll:GetVerticalScroll())
     self.stop:SetShown(c.nav.route~=nil);self.fold:SetShown(not compact and c.nav.route~=nil)
-    local tint=M.HasFilter(c.filter) and c.profile.colors.accent or {.65,.68,.73}
-    for _,line in ipairs(self.filterLines) do line:SetColorTexture(tint[1],tint[2],tint[3],1) end
+    self:RefreshFilter(c)
     self.pause:SetShown(compact);self:PauseIcon(c)
     self.routeHeading:Hide();self.resultsBoundary:Hide()
     if not self.from:HasFocus() then self.from:SetText(c.origin and c.origin.name or "Current location") end
