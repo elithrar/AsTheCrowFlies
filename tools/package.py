@@ -1,6 +1,6 @@
 """Build reproducible source or local-data development ZIP; never install it."""
 from pathlib import Path
-import argparse,hashlib,json,zipfile
+import argparse,hashlib,json,subprocess,zipfile
 ROOT=Path(__file__).resolve().parents[1]
 def main():
     parser=argparse.ArgumentParser();parser.add_argument('--local-data',action='store_true');args=parser.parse_args()
@@ -14,7 +14,7 @@ def main():
         assert hashlib.sha256(taxi).hexdigest()==provenance['payloadSHA256']
         payload['AsTheCrowFlies/Data/Taxi.lua']=taxi
         payload['AsTheCrowFlies/DATA-PROVENANCE.json']=(ROOT/'docs/data-provenance.json').read_bytes()
-    for name in ['README.md','NOTICES.md','plan.md','docs/BEHAVIOR.md','docs/COVERAGE.md','docs/VALIDATION.md','docs/data-provenance.json','docs/npc-coverage.json','docs/transport-audit.json','docs/performance.json']:
+    for name in ['README.md','NOTICES.md','plan.md','docs/BEHAVIOR.md','docs/COVERAGE.md','docs/VALIDATION.md','docs/REVIEW.md','docs/data-provenance.json','docs/npc-coverage.json','docs/transport-audit.json','docs/performance.json']:
         payload['AsTheCrowFlies/'+name]=(ROOT/name).read_bytes()
     if (ROOT/'LICENSE').exists():payload['AsTheCrowFlies/LICENSE']=(ROOT/'LICENSE').read_bytes()
     toc=payload['AsTheCrowFlies/AsTheCrowFlies.toc'].decode()
@@ -24,7 +24,8 @@ def main():
     with zipfile.ZipFile(file,'w',zipfile.ZIP_DEFLATED,compresslevel=9) as z:
         for name,data in sorted(payload.items()):
             info=zipfile.ZipInfo(name,date_time=(2026,10,11,0,0,0));info.compress_type=zipfile.ZIP_DEFLATED;info.external_attr=0o644<<16;z.writestr(info,data)
-    report=dict(file=file.name,bytes=file.stat().st_size,sha256=hashlib.sha256(file.read_bytes()).hexdigest(),files={n:hashlib.sha256(v).hexdigest() for n,v in payload.items()})
+    revision=subprocess.run(['git','rev-parse','HEAD'],cwd=ROOT,capture_output=True,text=True)
+    report=dict(file=file.name,bytes=file.stat().st_size,sha256=hashlib.sha256(file.read_bytes()).hexdigest(),sourceCommit=revision.stdout.strip() if revision.returncode==0 else None,files={n:hashlib.sha256(v).hexdigest() for n,v in payload.items()})
     (out/(version+'-manifest.json')).write_text(json.dumps(report,indent=2)+'\n')
     print(json.dumps({k:v for k,v in report.items() if k!='files'},indent=2))
 if __name__=='__main__':main()

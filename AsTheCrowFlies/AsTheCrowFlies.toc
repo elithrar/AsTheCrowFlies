@@ -3,7 +3,7 @@
 ## Notes: Compact destination search and honest compass/flight estimates for Forever.
 ## Author: Matt
 ## Version: 0.1.0-dev
-## SavedVariablesPerCharacter: AsTheCrowFliesDB, AsTheCrowFliesCharacter
+## SavedVariablesPerCharacter: AsTheCrowFliesDB, AsTheCrowFliesCharacter, AsTheCrowFliesProfiles
 ## OptionalDeps: QuestieDB, LibSharedMedia-3.0
 Model.lua
 Settings.lua

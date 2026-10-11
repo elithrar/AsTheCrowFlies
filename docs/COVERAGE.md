@@ -23,9 +23,19 @@ The additional exact-build transport audit decoded GameObjects (1,520 rows), Tra
 
 ## Installed NPC provider
 
-QuestieDB 1.0.5, contract 3, Forever flavor, commit `e0a6eaa86f181ac99262e34126bcd2ed1a1712d6`. Its public NPC API is queried at runtime in batches. The numeric AreaID→UiMapID support registry is parsed as data without `loadstring` or evaluation. It has 1,064 base entries and 47 overrides. The provider map source identifies an earlier Forever build, 69893; coordinates therefore retain **provider / eligibility unverified** labels.
+QuestieDB 1.0.5, contract 3, Forever flavor, commit `e0a6eaa86f181ac99262e34126bcd2ed1a1712d6`. Its public NPC API is queried at runtime in batches. The numeric AreaID→UiMapID support registry is parsed as data without `loadstring` or evaluation. It has 1,064 base entries and 47 overrides. The provider map source identifies an earlier Forever build, 69893; coordinates therefore retain provider provenance and a brief availability tooltip; they are not presented as current-build verified coordinates.
 
 `npc-coverage.json` records aggregate measurements of 13,311 baked base NPC rows using the actual addon classifier. These counts precede runtime corrections, native map projection, faction filtering and eligibility. They are not a full-world accuracy claim. There are 499 trainer-flag NPCs and 30 auctioneer-flag NPCs. Class coverage includes all nine class tokens (202 classified NPCs). Profession coverage includes all twelve supported profession categories plus unknown/special trainers. Current category counts are generated in the JSON report so they stay tied to the classifier checksum.
+
+| Primary category | NPC identities | Base coordinate records | Identities without spawn field |
+| --- | ---: | ---: | ---: |
+| Class trainers | 202 | 202 | 0 |
+| Profession trainers | 492 | 461 | 32 |
+| Auctioneer-flag NPCs | 30 | 28 | 2 |
+| Other trainers | 47 | 50 | 0 |
+| Additional quest NPCs | 1,613 | 2,088 | 9 |
+
+Service NPCs can additionally be searchable in the quest category. Coordinate counts can exceed identities because multiple recorded spawns remain distinct. Runtime provider corrections and valid native projection determine which records actually become pins. The installed `npcMeta.lua` explicitly defines the third spawn coordinate as an optional phase, not a floor; no floor identity is invented from that field.
 
 All 202 class-classified NPCs have spawn records. Seven service-flagged records lack spawns: five generic World profession trainers and two named Armor/Weapons Quartermasters with auctioneer flags. An installed-corrections audit supplied no missing positions. Another 27 title-only profession records without spawns have zero service flags, predominantly World/test/unused-style entries. They do not become invented pins. Hostile-to-both-factions provider NPCs are not offered as usable destinations. Phases, moving NPCs, faction context and quest giver/turn-in roles are retained. Current quest eligibility and profession trainable ranks are not inferred from flags or titles. The addon uses no remote NPC locator and makes no claim to contain every NPC in the current world.
 

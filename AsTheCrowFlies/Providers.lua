@@ -69,15 +69,15 @@ function P.Step(s,budget)
             if category=="trainer" then s.counts.unknownTrainers=s.counts.unknownTrainers+1 end
             for area,positions in pairs(type(spawns)=="table" and spawns or {}) do
                 local map=s.zone[area]
-                for index,xyz in ipairs(positions) do
-                    local p=map and A.FromMap(map,xyz[1]/100,xyz[2]/100)
+                for index,xyz in ipairs(type(positions)=="table" and positions or {}) do
+                    local p=map and type(xyz)=="table" and M.Number(xyz[1]) and M.Number(xyz[2]) and A.FromMap(map,xyz[1]/100,xyz[2]/100)
                     if p then
                         p.id="qdb:"..id..":"..area..":"..index;p.npcID=id;p.name=name or tostring(id)
                         p.category=category;p.class=class;p.profession=profession;p.role=title or role;p.faction=faction;p.available=faction~=nil
                         p.categories={};p.categories[category]=true
                         if type(starts)=="table" and next(starts) or type(ends)=="table" and next(ends) then p.categories.quest=true end
                         p.questStarts=type(starts)=="table" and #starts or 0;p.questEnds=type(ends)=="table" and #ends or 0
-                        p.phase=xyz[3];p.mobile=mobile;p.confidence="provider";p.source="QuestieDB Forever (placement/eligibility unverified)"
+                        p.phase=xyz[3];p.mobile=mobile;p.confidence="provider";p.source="QuestieDB Forever"
                         local info=A.Call(C_Map and C_Map.GetMapInfo,map);p.zone=info and info.name or ("Map "..map)
                         if p.phase then s.counts.phase=s.counts.phase+1 end
                         s.items[#s.items+1]=p;s.counts.spawns=s.counts.spawns+1

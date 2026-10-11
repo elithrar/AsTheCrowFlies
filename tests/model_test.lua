@@ -27,14 +27,87 @@ test('search duplicates accents class and factions',function()
     local hits=M.Search(items,'elan',{category='class'},{class='MAGE',faction='Alliance'});assert(#hits==2 and hits[1].id=='a','hits='..#hits..' fold='..M.Fold('Élan'))
     assert(#M.Search(items,'',{category='class'},{class='WARRIOR',faction='Alliance'})==0)
 end)
+
+test('role composition prefixes and typos outrank incidental names',function()
+    local items={
+        {id='incidental',name='Warrior Trainer Fan',category='quest',x=1,y=0,map=0},
+        {id='far',name='Wu Shen',category='class',class='WARRIOR',x=200,y=0,map=0},
+        {id='near',name='Lyria Du Lac',category='class',class='WARRIOR',x=100,y=0,map=0},
+        {id='mage',name='Maginor',category='class',class='MAGE',x=2,y=0,map=0},
+        {id='smith',name='Hank the Hammer',category='profession',profession='Blacksmithing',x=50,y=0,map=0},
+        {id='name-smith',name='Blacksmith Advocate',category='quest',x=1,y=0,map=0},
+    }
+    for _,query in ipairs({'Warrior Trainer','trainer warrior','warrior trianer'}) do
+        local found,rank=M.Search(items,query,{},ctx,nil,pos(0));assert(found[1].id=='near' and found[2].id=='far' and rank[found[1]]<rank[items[1]])
+    end
+    for _,query in ipairs({'Blacks...','Blacksmthing'}) do local found=M.Search(items,query,{},ctx,nil,pos(0));assert(found[1].id=='smith') end
+    assert(M.Search(items,'mgae trainer',{},ctx,nil,pos(0))[1].id=='mage')
+    local found=M.Search(items,'Warrior Trainer',{category='class'},{class='MAGE'},nil,pos(0));assert(#found==2 and found[1].id=='near')
+    assert(not items[1].relevance and not items[2].score)
+end)
+
+test('exact NPC names remain useful and equivalent tiers sort by distance then identity',function()
+    local items={
+        {id='far',name='Aldwin Laughlin',category='quest',map=0,x=100,y=0},
+        {id='near',name='Aldwin Laughlin Apprentice',category='quest',map=0,x=1,y=0},
+        {id='b',name='Mage Teacher',category='class',class='MAGE',map=0,x=20,y=0},
+        {id='a',name='Mage Teacher',category='class',class='MAGE',map=0,x=20,y=0},
+        {id='unknown',name='Mage Teacher',category='class',class='MAGE'},
+    }
+    assert(M.Search(items,'ALDWIN LAUGHLIN',{},ctx,nil,pos(0))[1].id=='far')
+    assert(M.Search(items,'Aldwn Laughlin',{},ctx,nil,pos(0))[1].id=='near')
+    local found=M.Search(items,'mage trainer',{},ctx,nil,pos(0));assert(found[1].id=='a' and found[2].id=='b' and found[3].id=='unknown')
+    assert(#M.Search(items,string.rep('x',129),{},ctx)==0 and #M.Search(items,'one two three four five six seven',{},ctx)==0)
+    assert(#M.Search(items,'mage '..string.rep('x',25),{},ctx)==0)
+end)
+
+test('multi-select categories union with local class and profession restrictions',function()
+    local items={
+        {id='mage',name='Mage',category='class',class='MAGE'},
+        {id='warrior',name='Warrior',category='class',class='WARRIOR'},
+        {id='smith',name='Smith',category='profession',profession='Blacksmithing'},
+        {id='cook',name='Cook',category='profession',profession='Cooking'},
+        {id='auction',name='Auctioneer',category='auction'},
+        {id='quest-warrior',name='Quest warrior',category='class',class='WARRIOR',categories={class=true,quest=true}},
+    }
+    local filter={categories={class=true,profession=true,auction=true},classes={MAGE=true},professions={Blacksmithing=true}}
+    local found=M.Search(items,'',filter,ctx);local ids={};for _,p in ipairs(found) do ids[p.id]=true end
+    assert(#found==3 and ids.mage and ids.smith and ids.auction and M.HasFilter(filter))
+    filter.categories.quest=true;found=M.Search(items,'',filter,ctx);assert(#found==4)
+    filter.categories={class=true};filter.classes={};assert(#M.Search(items,'',filter,{class='MAGE'})==3)
+    filter.categories={};filter.classes={MAGE=true};assert(not M.HasFilter(filter) and #M.Search(items,'',filter,ctx)==6)
+    assert(M.HasFilter({category='class'}) and not M.HasFilter({category='all'}) and not M.HasFilter(nil))
+    assert(#M.Search(items,'',{category='auction',class='MAGE',profession='Cooking'},ctx)==1)
+end)
 test('speed fallbacks reject invalid and taxi samples',function()
     assert(M.Speed(0,7)==7);assert(M.Speed(nil,nil)==7);assert(M.Speed(100,7)==7);assert(M.Speed(50,7,8,true)==8);assert(M.Speed(10,7,10)==10)
+end)
+
+test('ground allowance is bounded to bearings with zero and invalid input handling',function()
+    assert(M.GroundSeconds(0,7,'bearing')==0)
+    assert(M.GroundSeconds(700,7,'bearing')==135 and M.GroundSeconds(700,7,'verified')==100)
+    assert(M.GroundSeconds(700,14,'bearing')==67.5 and math.abs(M.GroundSeconds(700,50,'bearing')-18.9)<1e-9)
+    for _,speed in ipairs({0,-1,51,math.huge,0/0}) do assert(M.GroundSeconds(700,speed,'bearing')==135) end
+    assert(M.GroundSeconds(700,nil,'bearing')==135)
+    assert(not M.GroundSeconds(-1,7,'bearing') and not M.GroundSeconds(0/0,7,'bearing') and not M.GroundSeconds(math.huge,7,'bearing'))
 end)
 test('saved settings sanitize preserve and isolate builds',function()
     local p=S.Load({scale=999,font='Expressway',width=299,locked=true});assert(p.scale==1.6 and p.width==299 and p.locked)
     local _,readOnly=S.Load({version=99});assert(readOnly)
     assert(not next(S.Character({version=1,build='old',known={[2]={state='known'}}},'new').known))
     local c=S.Character({version=1,build='a',known={[2]={state='known'}},offers={x=1},timings={x={20,0/0,-4,30}}},'a');assert(c.known[2] and #c.timings.x==2 and not next(c.offers))
+end)
+
+test('build migration retains quarantined places without carrying taxi knowledge',function()
+    local place=pos(100,0,'saved-home');place.name='Saved home';place.category='place'
+    local old={version=1,build='old',known={[1]={state='known'}},timings={['1']={60}},places={place}}
+    local migrated=S.Character(old,'new')
+    assert(not next(migrated.known) and not next(migrated.timings) and #migrated.places==1)
+    assert(migrated.places[1].stale and migrated.places[1].available==false and migrated.places[1].observedBuild=='old')
+    assert(#M.Search(migrated.places,'home',nil,ctx)==0)
+    local reloaded=S.Character(migrated,'new')
+    assert(#reloaded.places==1 and reloaded.places[1].stale and reloaded.places[1].available==false and reloaded.places[1].observedBuild=='old')
+    assert(not old.places[1].stale and old.known[1] and old.timings['1'][1]==60)
 end)
 test('timing whole-itinerary bounds and outliers',function()
     local t={};for _,x in ipairs({60,62,58}) do assert(S.Sample(t,'1,2',x)) end
@@ -56,6 +129,50 @@ test('unknown flight conditional only; undiscovered blocked',function()
     local c={known={[4]={state='undiscovered'}},faction='Alliance'};assert(not R.Shortest(nodes,edges,3,4,c,nil,true))
     local e=edge(3,3,4,50);e.faction='Horde';assert(not R.Shortest(nodes,{e},3,4,ctx,nil,true))
 end)
+test('observed undiscovered alternative unlocks after discovery in either order',function()
+    local data={nodes=nodes,edges={edge(91,1,2,100)}}
+    for _,order in ipairs({'distance','time'}) do
+        local c=M.Copy(ctx);c.requireObserved=true;c.routeOrder=order;c.known[2].state='undiscovered'
+        local plans=R.Plan(pos(0),{pos(1100,0,'goal')},data,c)
+        assert(#plans==2 and plans[1].flight==0 and plans[2].unavailable=='undiscovered')
+        assert(plans[2].flight==100 and plans[2].eta<plans[1].eta)
+        c.known[2].state='known';plans=R.Plan(pos(0),{pos(1100,0,'goal')},data,c)
+        assert(#plans==2 and plans[1].flight==100 and not plans[1].unavailable and not plans[2].unavailable)
+    end
+end)
+
+test('unknown flight nodes never become undiscovered previews',function()
+    local data={nodes=nodes,edges={edge(92,1,2,100)}}
+    for _,requireObserved in ipairs({true,false}) do
+        local c=M.Copy(ctx);c.requireObserved=requireObserved;c.known[2]=nil
+        local plans=R.Plan(pos(0),{pos(1100,0,'goal')},data,c);assert(#plans==1 and not plans[1].unavailable)
+        c.known[2]={state='unknown'};plans=R.Plan(pos(0),{pos(1100,0,'goal')},data,c);assert(#plans==1 and not plans[1].unavailable)
+        c.known[2].state='undiscovered';c.known[1]=nil
+        plans=R.Plan(pos(0),{pos(1100,0,'goal')},data,c);assert(#plans==1 and not plans[1].unavailable)
+    end
+end)
+
+test('disabled alternatives cannot crowd three usable routes',function()
+    local c=M.Copy(ctx);c.known[2].state='undiscovered'
+    local data={nodes=nodes,edges={edge(93,1,2,10),edge(94,3,4,1000),edge(95,1,4,1400)}}
+    for _,order in ipairs({'distance','time'}) do
+        c.routeOrder=order;local plans=R.Plan(pos(0),{pos(1100,0,'goal')},data,c)
+        assert(#plans==3);for _,r in ipairs(plans) do assert(not r.unavailable) end
+    end
+end)
+
+test('offered whole flight ignores undiscovered flythrough and authoritative gates remain',function()
+    local c=M.Copy(ctx);c.requireObserved=true;c.taxiFrom=1;c.known[3].state='undiscovered'
+    local a,b=edge(96,1,3,50),edge(97,3,4,100)
+    local whole=edge('offered:96,97',1,4,150);whole.timingKey='96,97';whole.offered=true;whole.intermediate={3}
+    local plans=R.Plan(pos(0),{pos(1100,0,'goal')},{nodes=nodes,edges={a,b,whole}},c)
+    local found=false;for _,r in ipairs(plans) do if r.signature=='goal/96/97' then assert(not r.unavailable and not r.conditional);found=true end end;assert(found)
+    c.known[4].state='undiscovered';assert(not R.Summary({whole},pos(1100,0,'goal'),c).unavailable)
+    assert(not R.Shortest(nodes,{a,b},1,4,c,nil,true,true,'distance',true))
+    local offered=edge('offered:96',1,3,50);offered.offered=true
+    assert(not R.Shortest(nodes,{offered,b},1,4,c,nil,true,true,'distance',true))
+end)
+
 test('farther departure wins and flight alternatives survive walking shortcut',function()
     local plans=R.Plan(pos(0),{pos(1100,0,'goal')},{nodes=nodes,edges=edges},ctx)
     assert(#plans==3 and plans[1].flight==0)
@@ -90,7 +207,7 @@ test('estimated time searches longer faster route including both walking legs',f
     local c=M.Copy(ctx);c.timings={['11']={100},['12']={30}};c.routeOrder='time'
     local plans=R.Plan(pos(0),{pos(1100,0,'goal')},{nodes=nodes,edges={a,b}},c)
     assert(plans[1].legs[2].id==12 and plans[1].distance==1790)
-    assert(math.abs(plans[1].eta-(30+190/7))<1e-6)
+    assert(math.abs(plans[1].eta-(30+190/7*1.35))<1e-6)
     c.routeOrder='distance';local shortest=R.Plan(pos(0),{pos(1100,0,'goal')},{nodes=nodes,edges={a,b}},c)
     assert(shortest[1].flight==0 and shortest[2].legs[2].id==11)
     c.timings={};c.routeOrder='time';local uncalibrated=R.Plan(pos(0),{pos(1100,0,'goal')},{nodes=nodes,edges={a,b}},c)
@@ -102,10 +219,10 @@ test('time shortlist includes farther NPC reached quickly through discovered fli
     local ns={[1]=pos(0,0,1),[2]=pos(2000,0,2)}
     local data={nodes=ns,edges={{id=71,from=1,to=2,start=ns[1],finish=ns[2],mode='flight',distance=2100}}}
     local candidates={};for i=1,13 do candidates[i]=pos(500+i*10,0,'near'..i) end;candidates[14]=pos(2000,0,'far-trainer')
-    local c=M.Copy(ctx);c.routeOrder='time';c.timings={['71']={30}}
+    local c=M.Copy(ctx);c.routeOrder='time';c.timings={['71']={80}}
     local selected=R.Candidates(pos(0),candidates,data,c,12);local found=false
     for _,p in ipairs(selected) do if p.id=='far-trainer' then found=true end end;assert(found and #selected<=24)
-    local plans=R.Plan(pos(0),selected,data,c);assert(plans[1].destination.id=='far-trainer' and plans[1].flight>0 and plans[1].eta==30)
+    local plans=R.Plan(pos(0),selected,data,c);assert(plans[1].destination.id=='far-trainer' and plans[1].flight>0 and plans[1].eta==80)
     c.known={};selected=R.Candidates(pos(0),candidates,data,c,12)
     for _,p in ipairs(selected) do assert(p.id~='far-trainer') end
 end)
@@ -125,11 +242,55 @@ test('quality and ETA remain separate; immutable input',function()
     assert(r.eta==50 and r.legs[1].seconds==50 and e.seconds==nil)
     local s=V.New();s.route=r;s.leg=1;s.measure={at=10};local _,eta=V.Remaining(s,pos(0),7,20);assert(eta==40)
 end)
+
+test('bearing ETA stays consistent across cost summary display and remaining travel',function()
+    local before={mode='walk',distance=350,quality='bearing',start=pos(0),finish=pos(350)}
+    local flight={id=801,mode='flight',distance=1000,from=1,to=2,start=pos(350,0,'Departure'),finish=pos(1350,0,'Arrival'),offered=true}
+    flight.start.name='Departure';flight.finish.name='Arrival'
+    local after={mode='walk',distance=350,quality='bearing',start=flight.finish,finish=pos(1700,0,'goal')}
+    local c=M.Copy(ctx);c.timings={['801']={90}}
+    local route=N.Routes.Summary({before,flight,after},after.finish,c)
+    assert(route.distance==1700 and route.walk==700 and route.flight==1000 and route.eta==225 and route.groundAllowance)
+    assert(N.Routes.Seconds(before,c)==67.5 and route.legs[1].seconds==67.5 and route.legs[2].seconds==90)
+    assert(M.RouteLegs(route,7)=='Walk (~1 min)\nDeparture to Arrival (~2 min)\nWalk (~1 min)')
+    local state=V.New();assert(V.Start(state,route,pos(0),0))
+    local distance,eta=V.Remaining(state,pos(0),7,0);assert(distance==1700 and eta==route.eta)
+    distance,eta=V.Remaining(state,pos(175),7,10);assert(distance==1525 and eta==191.25)
+    _,eta=V.Remaining(state,pos(0),14,10);assert(eta==157.5)
+    assert(not before.seconds and not flight.seconds)
+end)
+
+test('route metadata remains isolated while immutable flight geometry is shared',function()
+    local e=edge(802,1,2,1100);e.points={{10,0},{1000,0}};e.geometry={{map=0,points=e.points}}
+    local route=R.Summary({e},nodes[2],ctx)
+    assert(route.legs[1].points==e.points and route.legs[1].geometry==e.geometry)
+    route.legs[1].start.name='Changed';route.legs[1].offered=true
+    assert(nodes[1].name~='Changed' and not e.offered and not e.seconds and e.points[2][1]==1000)
+end)
+
+test('category cost scan excludes invalid cross-map and hostile exits',function()
+    local candidates={};for i=1,13 do candidates[i]=pos(500+i,0,'near'..i) end
+    local far=pos(2000,0,'far');candidates[#candidates+1]=far
+    local ns={[1]=pos(0,0,1),[2]=pos(2000,0,2),[3]=pos(2000,0,3),[4]=pos(2000,0,4)}
+    ns[2].faction='Horde';ns[3].map=99;ns[4].x=0/0
+    local data={nodes=ns,edges={}}
+    for i=2,4 do data.edges[#data.edges+1]={id=810+i,from=1,to=i,distance=10,mode='flight'} end
+    local c=M.Copy(ctx);c.routeOrder='time';local selected=R.Candidates(pos(0),candidates,data,c,12)
+    for _,p in ipairs(selected) do assert(p.id~='far') end
+end)
 local walk={id='w',from='origin',to='goal',start=pos(0),finish=pos(100,0,'goal'),distance=100,mode='walk',quality='bearing'}
 local route=R.Summary({walk},walk.finish,ctx)
 test('arrival dwell floor and cancellation reset',function()
     local s=V.New();assert(V.Start(s,route,pos(0),0));V.Update(s,pos(100),1,false,false);assert(s.state=='walking');V.Update(s,pos(100),3,false,false);assert(s.state=='arrived')
     V.Stop(s);assert(not s.previous and not s.route);assert(V.Start(s,route,pos(0),4));local p=pos(100);p.uiMapID=2;V.Update(s,p,7,false,false);assert(s.state~='arrived')
+end)
+
+test('leaving NPC proximity clears nearby state and its obsolete message',function()
+    local imported=M.Copy(route);imported.destination.confidence='provider'
+    local state=V.New();assert(V.Start(state,imported,pos(0),0))
+    V.Update(state,pos(100),1,false,false);V.Update(state,pos(100),3,false,false)
+    assert(state.state=='nearby' and state.message:find('Nearby'))
+    V.Update(state,pos(130),4,false,false);assert(state.state=='walking' and not state.message and not state.dwell)
 end)
 test('hypothetical Go never starts at fictional origin',function() local s=V.New();assert(not V.Start(s,route,pos(500),0));assert(s.message) end)
 test('pause death teleport wrong flight transitions',function()
@@ -147,5 +308,67 @@ test('flight confirmed boarding landing and invalidated timing',function()
     V.Start(s,r,nodes[3],0);V.Update(s,nodes[3],2,true,false,{from=3,to=4});local sample=V.Update(s,nodes[4],32,false,false);assert(sample.seconds==30)
     V.Start(s,r,nodes[3],0);V.Update(s,nil,2,true,false,{from=3,to=4});assert(not V.Update(s,nodes[4],32,false,false,{from=3,to=4}));assert(s.leg==2)
     V.Start(s,r,nodes[3],0);assert(V.Target(s)==s.route.legs[1].start);V.Update(s,nodes[3],2,true,false,{from=3,to=4});assert(V.Target(s)==s.route.legs[1].finish)
+end)
+test('profile migration sanitizes legacy and isolates appearance',function()
+    local legacy={version=1,scale=1.2,font='Expressway',routeOrder='time',colors={accent={.1,.2,.3}},known={[1]=true},timings={a={20}}}
+    local store,readOnly=S.Profiles(nil,legacy)
+    assert(not readOnly and store.active=='Default' and store.version==1)
+    local p=store.profiles.Default;assert(p.scale==1.2 and p.routeOrder=='time' and p.colors.accent[2]==.2)
+    assert(not p.known and not p.timings and not store.known)
+    p.colors.accent[1]=.8;assert(legacy.colors.accent[1]==.1 and S.defaults.colors.accent[1]~=.8)
+    local restored=S.Profiles(store,{scale=.7});assert(restored.profiles.Default.scale==1.2 and restored.profiles.Default.colors.accent[1]==.8)
+    assert(not next(p.searchFilters.categories))
+    legacy.searchFilters={categories={class=true,quest=false,bad=true},classes={WARRIOR=true,MAGE=1,bad=true},professions={Blacksmithing=true,bad=true}}
+    local filtered=S.Profiles(nil,legacy);local q=filtered.profiles.Default.searchFilters
+    assert(q.categories.class and not q.categories.quest and not q.categories.bad and q.classes.WARRIOR and not q.classes.MAGE and not q.classes.bad)
+    assert(q.professions.Blacksmithing and not q.professions.bad)
+    q.classes.WARRIOR=nil;assert(legacy.searchFilters.classes.WARRIOR and not next(S.defaults.searchFilters.classes))
+    local duplicate=S.DuplicateProfile(filtered,'Filtered');duplicate.searchFilters.categories.class=nil
+    assert(filtered.profiles.Default.searchFilters.categories.class)
+end)
+
+test('nested colors and nonfinite settings are sanitized independently',function()
+    local input={width=0/0,scale=math.huge,font='',colors={background={-1,2,0/0,4},accent='bad',text={math.huge,.4,.5},extra={1,1,1}}}
+    local p=S.Load(input)
+    assert(p.width==S.defaults.width and p.scale==S.defaults.scale and p.font=='Expressway')
+    assert(p.colors.background[1]==0 and p.colors.background[2]==1 and p.colors.background[3]==S.defaults.colors.background[3])
+    assert(not p.colors.background[4] and not p.colors.extra and p.colors.accent[1]==S.defaults.colors.accent[1])
+    assert(p.colors.text[1]==S.defaults.colors.text[1] and p.colors.text[2]==.4)
+    p.colors.text[2]=.8;assert(input.colors.text[2]==.4)
+end)
+
+test('profile switch copy duplicate reset preserve names and independent values',function()
+    local store=S.Profiles(nil,{scale=1.1});local original=store.profiles.Default
+    local night=S.DuplicateProfile(store,' Night ');assert(night and store.active=='Night' and night~=original)
+    night.colors.background[1]=.3;night.scale=.8
+    assert(S.SwitchProfile(store,'Default').scale==1.1 and original.colors.background[1]~=.3)
+    local copied=S.CopyProfile(store,'Night');assert(store.active=='Default' and copied.scale==.8 and copied~=night)
+    copied.colors.background[1]=.6;assert(night.colors.background[1]==.3)
+    local reset=S.ResetProfile(store);assert(store.active=='Default' and reset.scale==S.defaults.scale and reset.colors.background[1]==S.defaults.colors.background[1])
+    reset.colors.background[1]=.7;assert(S.defaults.colors.background[1]~=.7)
+    assert(not S.SwitchProfile(store,'missing') and not S.CopyProfile(store,'missing'))
+end)
+
+test('profile names and stored profile count remain bounded',function()
+    local store=S.Profiles(nil,{})
+    for _,name in ipairs({'','  ','bad|name','bad\nname',string.rep('a',49),'Default'}) do assert(not S.DuplicateProfile(store,name)) end
+    for i=1,31 do assert(S.DuplicateProfile(store,'Profile'..i)) end
+    assert(not S.DuplicateProfile(store,'Overflow'))
+    local source={version=1,active='Z active',profiles={Default={scale=1.1},['Z active']={scale=.9,known={x=true}},['bad|name']={}}}
+    for i=1,40 do source.profiles['A'..i]={} end
+    local loaded=S.Profiles(source,{});local n=0;for _ in pairs(loaded.profiles) do n=n+1 end
+    assert(n==32 and loaded.active=='Z active' and loaded.profiles['Z active'].scale==.9 and not loaded.profiles['Z active'].known)
+    assert(not loaded.profiles['bad|name'])
+end)
+
+test('future settings and profile stores are protected from mutation',function()
+    local future={version=2,active='Future',profiles={Future={scale=.8}},unknown='keep'}
+    local store,readOnly=S.Profiles(future,{scale=1.1});assert(readOnly and store.readOnly and future.unknown=='keep' and future.active=='Future')
+    assert(not S.SwitchProfile(store,'Default') and not S.DuplicateProfile(store,'New') and not S.CopyProfile(store,'Default') and not S.ResetProfile(store))
+    local nested={version=1,active='Default',profiles={Default={version=2,unknown='keep'}}}
+    local _,nestedReadOnly=S.Profiles(nested,{});assert(nestedReadOnly and nested.profiles.Default.unknown=='keep')
+    local _,legacyReadOnly=S.Profiles(nil,{version=2});assert(legacyReadOnly)
+    local p,pReadOnly=S.Load({version=2,colors={accent={0,0,0}}});assert(pReadOnly and p.colors.accent[1]==S.defaults.colors.accent[1])
+    p.colors.accent[1]=0;assert(S.defaults.colors.accent[1]~=0)
 end)
 print('PASS model scenarios: '..count)

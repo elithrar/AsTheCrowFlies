@@ -1,5 +1,27 @@
 local ADDON,N=...;local M,A,R,V=N.Model,N.Adapter,N.Routes,N.Navigation
-local C={nav=V.New(),destinations={},filter={category="all"},results={},selected=1,searchGeneration=0};N.Core=C
+local C={nav=V.New(),destinations={},filter={categories={},classes={},professions={}},results={},selected=1,searchGeneration=0};N.Core=C
+function C:BindFilters(refresh)
+    self.profile.searchFilters=self.profile.searchFilters or {categories={},classes={},professions={}}
+    self.filter=self.profile.searchFilters
+    if refresh then
+        if self.matches~=nil or self.searching then self:Search(self.searchOrigin and self.originQuery or self.query or "",self.searchOrigin)
+        elseif #self.results>0 then self:Plan() end
+    end
+end
+function C:Filter(group,key)
+    local f=self.filter
+    if group=="all" then f.categories={};f.classes={};f.professions={}
+    elseif group=="categories" then
+        f.categories[key]=not f.categories[key] or nil
+        if key=="class" and f.categories[key] and not next(f.classes) and self.ctx.class then f.classes[self.ctx.class]=true end
+        if not f.categories[key] and key=="class" then f.classes={} end
+        if not f.categories[key] and key=="profession" then f.professions={} end
+    else
+        f.categories[group=="classes" and "class" or "profession"]=true
+        if key=="all" then f[group]={} else f[group][key]=not f[group][key] or nil end
+    end
+    self.destination=nil;self:Edit(true);self:Search(self.query or "",false)
+end
 function C:Context()
     self.ctx=A.Context(self.ctx and self.ctx.speed);self.ctx.known=self.character.known;self.ctx.timings=self.character.timings;self.ctx.flightPrior=self.profile.flightPrior;self.ctx.requireObserved=true
     self.ctx.routeOrder=self.profile.routeOrder
@@ -16,24 +38,51 @@ function C:Reindex()
     end
 end
 function C:Refresh() if N.UI.frame then N.UI:Refresh(self) end end
-function C:Edit()
-    self.manualPause=false
-    self.searchGeneration=self.searchGeneration+1;self.matches=nil
-    V.Stop(self.nav);self.character.intent=nil;self.chosenFlight=nil;self.compact=false;self.results={};self:Refresh();N.Overlay:Clear()
+function C:ApplyProfile()
+    if not self.readOnly then AsTheCrowFliesDB=self.profile end
+    N.UI:RefreshFonts();N.UI:ApplyAppearance();self:Refresh()
+    if N.Options.frame then N.Options:Refresh() end
+end
+function C:ShowPanel(show)
+    self.hidden=not show;if show then self.tucked=false end
+    if N.UI.menu then N.UI.menu:Hide() end
+    for _,d in ipairs(N.UI.dropdowns or {}) do d:CloseMenu() end
+    self:Refresh()
+end
+function C:Edit(preserveNavigation)
+    if not preserveNavigation then self.manualPause=false;V.Stop(self.nav);self.character.intent=nil;self.chosenFlight=nil;N.Overlay:Clear() end
+    self.searchGeneration=self.searchGeneration+1;self.matches=nil;self.searching=nil;self.planned=nil
+    self.compact=false;self.results={};self:Refresh()
+end
+function C:Back()
+    if N.UI.filterButton and N.UI.filterButton:IsMenuOpen() then N.UI.filterButton:CloseMenu();return end
+    if N.UI.menu and N.UI.menu:IsShown() then N.UI.menu:Hide();return end
+    if N.Options.frame and N.Options.frame:IsShown() then N.Options.frame:Hide();return end
+    self.searchGeneration=self.searchGeneration+1;self.searching=nil;self.planned=nil;N.UI.from:ClearFocus();N.UI.to:ClearFocus();self.status=nil
+    if self.compact then self.compact=false
+    elseif #self.results>0 then self.results={};self.destination=nil;self:Search(self.query or "",false)
+    elseif self.matches then self.matches=nil
+    elseif self.destination or self.origin then
+        if self.origin and (self.lastSelection=="origin" or not self.destination) then local name=self.origin.name;self.origin=nil;self:Search(name or "",true)
+        else self.destination=nil;self:Search(self.query or "",false) end
+        self.lastSelection=nil
+    elseif self.nav.route then self.compact=true
+    else self.tucked=true end
+    self:Refresh()
 end
 function C:Search(query,origin)
-    if not origin then self.query=query end
-    self.searchGeneration=self.searchGeneration+1;local generation=self.searchGeneration
+    if origin then self.originQuery=query else self.query=query end
+    self.searchGeneration=self.searchGeneration+1;local generation=self.searchGeneration;self.matches=nil;self.results={};self.searching=true;self.searchOrigin=origin;self:Refresh()
     local function run()
         if generation~=self.searchGeneration then return end
-        self.matches=M.Search(self.destinations,query,origin and {} or self.filter,self:Context(),40);self.highlight=1;self.searchOrigin=origin;self:Refresh()
+        self.searching=nil;self.matches=M.Search(self.destinations,query,origin and {} or self.filter,self:Context(),40,A.Position());self.highlight=1;self.searchOrigin=origin;self.status=nil;self:Refresh()
     end
     if C_Timer and C_Timer.After then C_Timer.After(.12,run) else run() end
 end
 function C:Choose(p,origin)
     if not p then return end
-    self.searchGeneration=self.searchGeneration+1;self.matches=nil
-    if origin then self.origin=p else self.destination=p end
+    self.searchGeneration=self.searchGeneration+1;self.matches=nil;self.searching=nil
+    if origin then self.origin=p;self.lastSelection="origin" else self.destination=p;self.lastSelection="destination" end
     self.results={};self:Refresh()
 end
 function C:Enter()
@@ -42,11 +91,25 @@ function C:Enter()
     return "planned"
 end
 function C:Plan(useCurrent)
-    self.searchGeneration=self.searchGeneration+1;self.matches=nil;self.status=nil
+    self.searchGeneration=self.searchGeneration+1;self.matches=nil;self.searching=nil;self.planned=true;self.status=nil
     local origin=not useCurrent and self.origin or A.Position()
     if useCurrent then self.origin=nil end
-    local candidates=self.destination and {self.destination} or M.Search(self.destinations,self.query or "",self.filter,self:Context())
-    if not self.destination and self.filter.category=="all" then self.status="Choose a destination or category";self:Refresh();return end
+    local candidates,ranks
+    if self.destination then candidates={self.destination}
+    else
+        candidates,ranks=M.Search(self.destinations,self.query or "",self.filter,self:Context())
+        if (self.query or ""):find("%S") and candidates[1] and ranks then
+            local best=ranks[candidates[1]];local preferred={}
+            for _,p in ipairs(candidates) do if ranks[p]==best then preferred[#preferred+1]=p end end;candidates=preferred
+        end
+    end
+    if not self.destination and not M.HasFilter(self.filter) and not (self.query or ""):find("%S") then self.results={};self.status="Choose a destination or filter";self:Refresh();return end
+    if #candidates==0 then
+        local categories=self.filter.categories or {};local npc=not M.HasFilter(self.filter)
+        for key in pairs(categories) do if key~="place" and key~="flight" then npc=true end end
+        self.results={};self.status=npc and not self.provider and "NPC search requires Forever QuestieDB." or npc and type(self.provider.ids)=="table" and self.provider.cursor<=#self.provider.ids and "Indexing NPC destinations..." or "No matching destinations."
+        self:Refresh();return
+    end
     local capped;candidates,capped=R.Candidates(origin,candidates,self.data,self:Context(),12)
     self.results,self.status=R.Plan(origin,candidates,self.data,self:Context());self.selected=1
     self.categoryCapped=capped;self.categoryCompared=#candidates
@@ -54,6 +117,7 @@ function C:Plan(useCurrent)
     self:Refresh()
 end
 function C:Go()
+    if self.results[self.selected] and self.results[self.selected].unavailable then self.status="Discover the required flight points first.";self:Refresh();return end
     if self.origin then self:Plan(true);self.status="Recalculated from current location. Review, then Go.";self:Refresh();return end
     local r=self.results[self.selected];local p=A.Position()
     if V.Start(self.nav,r,p,GetTime()) then
@@ -63,15 +127,20 @@ function C:Go()
     else self.status=self.nav.message or "Choose a route first" end
     self:Refresh()
 end
-function C:Stop() self:Edit();self.status="Navigation stopped";self:Refresh() end
+function C:Stop() self:Edit();self.status=nil;self:Refresh() end
 function C:TaxiOpened()
     local p=A.Position();if not p then return end
     A.ObserveMap(p.uiMapID,self.character,self.data.nodes)
     local observation=A.Taxi(p.uiMapID,self.character,self.data);self.taxi=observation
-    if not observation then return end
+    if not observation then
+        self:Reindex();if #self.results>0 then self:Plan() else self:Refresh() end;return
+    end
     -- Runtime master proximity is a sanity check against coordinate/axis mistakes.
     local node=self.data.nodes[observation.from]
-    if not node or (M.Distance(p,node) or math.huge)>150 then self.taxi=nil;self.status="Flight-master position could not be reconciled";return end
+    if not node or (M.Distance(p,node) or math.huge)>150 then
+        self.taxi=nil;self:Reindex();if #self.results>0 then self:Plan() end
+        self.status="Flight-master position could not be reconciled";self:Refresh();return
+    end
     node.uiMapID=p.uiMapID
     -- An offered whole itinerary can include fly-through nodes the player has
     -- never discovered. Store it as one observed edge, never split its timing.
@@ -98,7 +167,7 @@ function C:TaxiOpened()
             else self.expected=nil;self.nav.state="unavailable";self.nav.message="This flight is not offered here; recalculate" end
         end
     end
-    self:Refresh()
+    if #self.results>0 then self:Plan() else self:Refresh() end
 end
 function C:TaxiSelected(slot)
     if not self.taxi or not self.nav.route then return end
@@ -120,6 +189,11 @@ function C:Tick()
 end
 function C:Initialize()
     self.build=A.Build();self.profile,self.readOnly=N.Settings.Load(AsTheCrowFliesDB,self.build)
+    self.profiles,self.profilesReadOnly=N.Settings.Profiles(AsTheCrowFliesProfiles,self.profile)
+    self.readOnly=self.readOnly or self.profilesReadOnly
+    self.profile=self.profiles.profiles[self.profiles.active]
+    self:BindFilters()
+    if not self.readOnly then AsTheCrowFliesProfiles=self.profiles end
     if not self.readOnly then AsTheCrowFliesDB=self.profile end
     local futureCharacter=type(AsTheCrowFliesCharacter)=="table" and type(AsTheCrowFliesCharacter.version)=="number" and AsTheCrowFliesCharacter.version>1
     self.character=N.Settings.Character(AsTheCrowFliesCharacter,self.build)
@@ -139,6 +213,7 @@ function C:Initialize()
     for _,id in ipairs(self.data.taxiMaps or {}) do A.ObserveMap(id,self.character,self.data.nodes) end
     self:Context();self:Reindex();self.ready=true
     N.UI:Create(self);N.Overlay:Create();N.Options:Create(self)
+    N.UI:WatchFonts();N.UI:ApplyAppearance()
     self.status=self.character.intent and "Previous route stopped on reload. Choose a destination to resume." or nil
     if self.build~=N.Data.build then self.status="Unvalidated client build: flight data disabled" end
     self:Refresh()
@@ -148,7 +223,9 @@ function C:Initialize()
     if provider then
         local function step()
             local done=N.Providers.Step(provider,40)
-            if done then self:Reindex();self.providerStatus=string.format("%d provider locations • eligibility unverified",#provider.items);self:Refresh()
+            if done then
+                self:Reindex();self.providerStatus=nil
+                if self.matches~=nil then self:Search(self.searchOrigin and self.originQuery or self.query or "",self.searchOrigin) else self:Refresh() end
             else C_Timer.After(.01,step) end
         end
         C_Timer.After(.1,step)
@@ -159,7 +236,8 @@ for _,event in ipairs({"ADDON_LOADED","TAXIMAP_OPENED","TAXIMAP_CLOSED","PLAYER_
 frame:SetScript("OnEvent",function(_,event,arg)
     if event=="ADDON_LOADED" and arg==ADDON then C:Initialize()
     elseif C.ready then
-        if event=="TAXIMAP_OPENED" then C:TaxiOpened()
+        if event=="ADDON_LOADED" then N.UI:WatchFonts()
+        elseif event=="TAXIMAP_OPENED" then C:TaxiOpened()
         elseif event=="TAXIMAP_CLOSED" then
             C.taxi=nil;for _,edge in ipairs(C.data.edges) do if edge.live then edge.offered=false end end
             local function invalidate(route)
@@ -168,7 +246,7 @@ frame:SetScript("OnEvent",function(_,event,arg)
             for _,route in ipairs(C.results) do invalidate(route) end;invalidate(C.nav.route);C:Refresh()
         elseif event=="PLAYER_ENTERING_WORLD" then
             C.nav.measure=nil;C.nav.previous=nil
-            local p=A.Position();if p then A.ObserveMap(p.uiMapID,C.character,C.data.nodes) end
+            local p=A.Position();if p then A.ObserveMap(p.uiMapID,C.character,C.data.nodes);C:Reindex();if #C.results>0 then C:Plan() end end
         elseif event=="PLAYER_LOGOUT" then if C.ticker then C.ticker:Cancel() end
         elseif event=="UI_SCALE_CHANGED" or event=="DISPLAY_SIZE_CHANGED" then N.UI:Layout(C) end
     end
@@ -176,13 +254,15 @@ end)
 SLASH_ASTHECROWFLIES1="/atcf"
 SlashCmdList.ASTHECROWFLIES=function(text)
     if not C.ready then return end
-    local cmd,rest=text:match("^(%S*)%s*(.-)$")
+    local cmd,rest=(text or ""):match("^%s*(%S*)%s*(.-)$");cmd=cmd:lower()
     if cmd=="stop" then C:Stop()
-    elseif cmd=="options" then N.Options.frame:SetShown(not N.Options.frame:IsShown())
+    elseif cmd=="" or cmd=="options" or cmd=="opts" then N.Options:Open()
+    elseif cmd=="hide" then C:ShowPanel(false)
+    elseif cmd=="show" then C:ShowPanel(true)
     elseif cmd=="remember" then
         local point=N.Providers.Remember(C.character,A.Position(),rest~="" and rest or (GetZoneText() or "Saved place"))
-        C:Reindex();C.status=point and "Saved current location" or "Location unavailable";C:Refresh()
-    else N.UI:Toggle(C) end
+        C:Reindex();C.status=point and "Location saved" or "Location unavailable";C:Refresh()
+    else C.status="Use /atcf options, show, hide or stop.";C:Refresh() end
 end
 N.Toggle=function() if C.ready then N.UI:Toggle(C) end end
 _G.AsTheCrowFlies_Toggle=N.Toggle

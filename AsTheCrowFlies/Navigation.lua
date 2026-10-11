@@ -2,6 +2,7 @@ local _,N=...;local M=N.Model;local V={};N.Navigation=V
 function V.New() return {state="editing",generation=0,leg=1} end
 function V.Stop(s) s.generation=s.generation+1;s.state="editing";s.route=nil;s.dwell=nil;s.measure=nil;s.message=nil;s.previous=nil;s.previousTime=nil;s.flightSeen=nil;s.suspendedState=nil end
 function V.Start(s,route,actual,now)
+    if route and route.unavailable then s.message="Discover the required flight points first.";return false end
     V.Stop(s);if not route or not M.Position(actual) then return false end
     local first=route.legs[1]
     if not first or (M.Distance(first.start,actual) or math.huge)>40 then s.message="Recalculate from current location";return false end
@@ -59,7 +60,10 @@ function V.Update(s,p,now,onTaxi,dead,offer)
                 if s.route.destination.confidence=="observed" and not s.route.destination.mobile then s.state="arrived" else s.state="nearby";s.message="Nearby: confirm the NPC / floor" end
             else s.leg=s.leg+1;s.state="walking" end
         end
-    else s.dwell=nil;s.state="walking" end
+    else
+        if s.state=="nearby" then s.message=nil end
+        s.dwell=nil;s.state="walking"
+    end
 end
 function V.Remaining(s,p,speed,now)
     if not s.route then return nil end
@@ -72,7 +76,7 @@ function V.Remaining(s,p,speed,now)
             local duration=e.seconds or d/32
             if i==s.leg and s.measure then duration=math.max(0,duration-(now-s.measure.at)) end
             seconds=seconds+duration
-        else seconds=seconds+d/(speed or 7) end
+        else seconds=seconds+M.GroundSeconds(d,speed,e.quality) end
     end
     return distance,seconds
 end
