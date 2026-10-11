@@ -289,7 +289,7 @@ function U:Menu(parent,x,y,w,label,entries,choose)
     self.dropdowns=self.dropdowns or {};self.dropdowns[#self.dropdowns+1]=d;return d
 end
 function U:RefreshFilter(c)
-    local d=self.filterButton;local tint=M.HasFilter(c.filter) and c.profile.colors.accent or {1,1,1}
+    local d=self.filterButton;local tint=M.HasFilter(c.filter) and {1,.82,0} or {.75,.75,.75}
     d.icons.filter.texture:SetVertexColor(tint[1],tint[2],tint[3],1);d.text:SetTextColor(unpack(tint))
     d.bg:SetVertexColor(unpack((d.atcfHovered or d:IsMenuOpen()) and d.hoverColor or d.normalColor))
 end
