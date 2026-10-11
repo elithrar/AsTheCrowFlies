@@ -1,0 +1,21 @@
+name: Addon tests
+on:
+  pull_request:
+  push:
+    branches: [main, feat/forever-navigation]
+permissions:
+  contents: read
+jobs:
+  lua-and-package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --target .work/pydeps lupa==2.8
+      - run: python tests/run.py
+      - run: python tests/release_test.py
+      - run: python tests/package_test.py --source-only

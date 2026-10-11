@@ -1,0 +1,44 @@
+# Behavior and local development
+
+## Route comparison
+
+The directed taxi graph uses Dijkstra search with nonnegative costs. Distance mode minimizes total yards; Estimated time mode minimizes estimated seconds, including the walking leg to the departure master and the walking leg from arrival. The model also searches the other objective and bounded alternatives formed by removing individual flight edges. Results deduplicate matching itineraries, prefer current offered evidence on ties, and show at most three options. Distance is the default; choose Estimated time above route results or in settings for quickest estimated travel. Both controls save the same preference and replan displayed alternatives without replacing active navigation. Route quality precedes either ordering. These are bounded alternatives, not an exhaustive enumeration.
+
+A category search filters by player faction, requested class/profession and typed query. Selected categories are combined with OR; class/profession subsets restrict only their own category. Empty categories mean All and ignore inactive subsets. Typed queries prioritize exact full NPC names and semantic role/type matches ahead of incidental names, with distance and stable ties inside each relevance tier. Prefixes and bounded edit-distance matching accept partial text and common typos. Route planning retains the best relevance tier before its distance/time shortlist, so an incidental nearby name cannot displace the requested service. Distance mode compares the twelve closest destination records. Time mode also includes up to twelve candidates ranked by running plus estimated arrival at reachable flight exits: one multi-source shortest-time pass supplies those arrival bounds. The union is at most 24 records and records whether the comparison was truncated. This bounded heuristic is not a global fastest-NPC guarantee. Individual NPC searches select a specific spawn. A preview From is recalculated from the player's current position before Go.
+
+Static flight candidates require both endpoints to be observed as discovered for the current character and client build. Missing observations remain unknown and are excluded. Explicitly undiscovered endpoints can appear in separate darkened previews with a red label and disabled Go. Usable alternatives take priority; disabled previews fill only unused result slots. At an open flight master, an offered whole itinerary may include undiscovered fly-through nodes. Each offered hop must match a unique directed client path; ambiguous or unknown paths are rejected. Runtime slots are temporary and never saved as node IDs. Closing the taxi window invalidates the offer label, including copied cards.
+
+While that window is open, the current master's offers override conflicting static departures. Offered full itineraries cannot silently acquire additional unoffered flight legs. After context closes, static candidates can be considered again with conditional availability. Confirmed boarding identity survives temporary missing positions independently of timing validity; recomputing previews does not overwrite an active flight's state.
+
+Distances sum three-dimensional flight samples plus the short straight endpoint gaps to the listed taxi nodes. Paths with endpoint gaps over 150 yards, self loops, unresolved conditions/events or continent transitions are excluded. Only actual sampled flight segments are drawn; no line is invented between disjoint splines or across ground. All ground legs remain direct compass bearings, not traversable routes through terrain, interiors or barriers.
+
+Soft ETA uses observable current/typical movement speed with a 7 yd/s fallback. Bearing-only ground time is `direct yards / speed × 1.35`: a fixed, bounded 35% allowance for bends, hills and obstacles. This general factor is uncalibrated, has no per-zone exceptions, adds nothing at zero distance and cannot establish that a ground connection is traversable. Physical distance is unchanged. The same helper supplies time ranking, candidate selection, leg summaries and remaining ETA; no second buffer is added. Verified/approximate corridor lengths would use their own distance without this bearing allowance, but none are currently supplied. Flights use a valid observed whole-itinerary duration when present; otherwise they use the explicitly uncalibrated 32 yd/s prior. Whole-itinerary measurements are never divided into invented per-hop times. Timing history is bounded, rejects large outliers, and is invalidated by loading, missing positions, death, teleportation, wrong flights and pause. Stops, detours, waiting and service interactions remain outside the estimate. The fastest estimate can therefore differ from the fastest real journey.
+
+## Guidance and settings
+
+The idle panel is 129 logical pixels tall: header, From and To. Search, selection, results and navigation expand it as needed. The funnel beside To opens the matching client's native checkbox menu with category OR selection, nested class/profession choices and All reset. Selecting class trainers initially chooses the player class. Active filters tint the funnel; selections persist independently in each profile. Empty searches distinguish unavailable NPC data, indexing and no matches. Clearing a field also clears its pending query, so blur or Enter cannot resurrect an old search.
+
+Find routes selects the highlighted unfiltered destination and plans in one click. With category filters and no explicit destination, Compare matches compares the eligible matches. When selecting From, Use origin accepts that location without planning or replacing active navigation. Pending searches disable the action. Keyboard Enter retains its select-then-plan sequence. The crosshair restores the current origin.
+
+Route alternatives for one destination share its name and type/location above the list. Cards identify Walk or Walk + fly and show one total estimate with distance. Flight details label each Walk/Fly leg, retain planned leg times and wrap full station names below the Go button. Direct walking cards omit a duplicate itinerary. Comparisons across different destination records retain each card's destination identity. All matches remain scrollable; wrapped text determines row height, and a lower boundary separates overflowing results from the footer and resize grip.
+
+Go collapses the panel without changing its width. Edit/routes expands it; Pause/Resume and Stop remain available. At an unverified or mobile NPC, Done confirms arrival manually. Saved places use proximity, map/floor identity and dwell time. Reload stops navigation and preserves settings and known-node observations; it does not resume a possibly stale journey. A client-build change clears taxi knowledge/timing, while player-recorded places are preserved with their old build and quarantined from search until re-recorded.
+
+Drag the header to move the panel, or snap near either screen edge. The return-arrow button returns to the previous view without stopping active navigation; the cog opens Settings, Save location, Lock, Tuck and Close. Tuck is a separate explicit menu action. The bottom-right grip resizes unlocked results and persists their size. Settings provide font, font size, scale, background/text/accent colors, position lock, independent map/minimap markers, placement reset, route ordering and per-character named profiles. Duplicate, switch, copy and reset preserve character discovery/timing; destructive profile operations have inline confirmation and cancel. `/atcf`, `/atcf options` and `/atcf opts` open settings idempotently; `/atcf show` and `/atcf hide` control panel visibility. Expressway is requested from installed SharedMedia, never bundled. Flight selection and movement remain manual.
+
+## Reproducing MONOLITH data
+
+The exact-build workflow reads installed data through task-2's existing read-only extractor and pinned schemas. It does not alter task-2 or the game. Raw data and generated taxi payload remain under ignored `.work/`.
+
+```text
+python tools/extract_local.py
+node tools/decode_tables.cjs
+python tools/build_data.py
+python tests/data_test.py
+python tests/benchmark.py
+python tests/measure_provider.py
+python tests/package_test.py
+python tools/package.py --local-data
+```
+
+The optional transport audit uses `python tools/extract_local.py --transport` and `node tools/decode_tables.cjs --transport`. Readable transport geometry does not establish passenger-stop connectivity. See `transport-audit.json` and the coverage document. Unknown schemas and encrypted records are rejected; no unavailable keys are guessed. Hotfix overlays are not applied. Public data rights and actual Forever smoke tests remain release gates.

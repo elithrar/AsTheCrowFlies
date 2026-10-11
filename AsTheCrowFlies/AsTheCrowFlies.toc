@@ -1,0 +1,21 @@
+## Interface: 16001
+## Title: As The Crow Flies
+## Notes: Compact destination search and honest compass/flight estimates for Forever.
+## Author: Matt
+## Version: 0.1.0
+## X-Curse-Project-ID: 1739133
+## SavedVariablesPerCharacter: AsTheCrowFliesDB, AsTheCrowFliesCharacter, AsTheCrowFliesProfiles
+## OptionalDeps: QuestieDB, LibSharedMedia-3.0
+Model.lua
+Settings.lua
+Data/Registry.lua
+Data/Taxi.lua
+Routes.lua
+Navigation.lua
+Adapter.lua
+Providers.lua
+UI.lua
+Overlay.lua
+Options.lua
+Core.lua
+Bindings.xml

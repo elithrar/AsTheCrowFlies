@@ -1,0 +1,61 @@
+{
+  "build": "1.60.1.70338",
+  "buildKey": "f6e309c700cea095978aeb5d85210df4",
+  "product": "wow_classic_beta",
+  "readerSHA256": "73071f4089de9bc076ce825edf5b8e35154f3b64cfe79e0206221f0d4ddd7736",
+  "listfileSHA256": "9550c5d40606ec79ed43ab3762a4da4132be30ed9ba34572569b4e39e748c840",
+  "tables": {
+    "GameObjects": {
+      "fileDataID": 841620,
+      "readable": true,
+      "sha256": "3db3a7ba438421af4fc3fd9dcd1ae429048eb5494f6632d0b4ccb79b57e00c3a",
+      "sourceRowCount": 1520,
+      "layoutHash": "44BD453C",
+      "schemaSha256": "e4e70b2e00a114d83643eef42ba6814f7854de2fbe4c7ea253ca13115525a2ba",
+      "schemaCommit": "07d008f28907c00827cacadf2d7c1a40f578b6a3"
+    },
+    "TransportPhysics": {
+      "fileDataID": 1121973,
+      "readable": true,
+      "sha256": "9d3d1cf06b5b755125f6b08af870f1a937cf554a12fa43c8be2039abd9210ad3",
+      "sourceRowCount": 0,
+      "layoutHash": "E05919AE",
+      "schemaSha256": "f80bb121d435bec9b909c942d2bd16acf9d88a1aef7d60fd8a3aee864eaaa953",
+      "schemaCommit": "07d008f28907c00827cacadf2d7c1a40f578b6a3"
+    },
+    "TransportAnimation": {
+      "fileDataID": 1140686,
+      "readable": true,
+      "sha256": "fa124e1eea73b0c1e6e2dea0bb884e947caf724373e30218c30db397e5e10a30",
+      "sourceRowCount": 1016,
+      "layoutHash": "E622B105",
+      "schemaSha256": "0fddf9a2d2e77b5108d634eaf689175f2f85b788b75eb80d14b3ce842d33dfd6",
+      "schemaCommit": "07d008f28907c00827cacadf2d7c1a40f578b6a3"
+    },
+    "TransportRotation": {
+      "fileDataID": 1140687,
+      "readable": true,
+      "sha256": "a5503881b02f64d0cbd81a308df8aea4a10dff8fa2225e1ce7b708ab91ee512c",
+      "sourceRowCount": 0,
+      "layoutHash": "D92B0C43",
+      "schemaSha256": "57ee71348bf63f2f5c0eecee05b6189a448fe601c2f9cd36ec2111c39b21cbf0",
+      "schemaCommit": "07d008f28907c00827cacadf2d7c1a40f578b6a3"
+    },
+    "LoadingScreenTaxiSplines": {
+      "fileDataID": 1302239,
+      "readable": true,
+      "sha256": "bb618c59de38b216bf200b91fd54a3fdec6c138aaee4a1d29483507bd0ed7f9d",
+      "sourceRowCount": 18,
+      "layoutHash": "877DB13E",
+      "schemaSha256": "ec989b73309025e875ead13bf54ded74b8dc756b89adb7a6c2ca91a4bd468ddc",
+      "schemaCommit": "07d008f28907c00827cacadf2d7c1a40f578b6a3"
+    },
+    "GameObjects_internal": {
+      "fileDataID": 1323228,
+      "readable": false,
+      "sha256": null
+    }
+  },
+  "routingEdgesAdded": 0,
+  "reason": "Readable signs, animations and loading-screen splines do not establish passenger-stop, event or schedule semantics. TransportPhysics and TransportRotation contain zero rows; GameObjects_internal is missing. TaxiPath 293 and 301 have spline continents that contradict their nominal passenger endpoints."
+}

@@ -1,0 +1,63 @@
+{
+  "baseSpawnRecords": {
+    "auction": 28,
+    "class": 202,
+    "profession": 461,
+    "quest": 2088,
+    "trainer": 50
+  },
+  "classNPCs": {
+    "DRUID": 16,
+    "HUNTER": 29,
+    "MAGE": 25,
+    "PALADIN": 11,
+    "PRIEST": 31,
+    "ROGUE": 26,
+    "SHAMAN": 11,
+    "WARLOCK": 21,
+    "WARRIOR": 32
+  },
+  "classifiedNPCs": {
+    "auction": 30,
+    "class": 202,
+    "profession": 492,
+    "quest": 1613,
+    "trainer": 47
+  },
+  "classifierSHA256": "e9c35e0464f5ba4e35bd1dc003ae9286234ca3697b3feffdef325da7a1690a7d",
+  "friendlyClassifiedNPCs": {
+    "auction": 30,
+    "class": 202,
+    "profession": 489,
+    "quest": 1585,
+    "trainer": 45
+  },
+  "npcIDsWithoutSpawnField": {
+    "auction": 2,
+    "profession": 32,
+    "quest": 9
+  },
+  "npcScalarRows": 13311,
+  "professionNPCs": {
+    "Alchemy": 48,
+    "Blacksmithing": 89,
+    "Cooking": 32,
+    "Enchanting": 28,
+    "Engineering": 49,
+    "First Aid": 17,
+    "Fishing": 47,
+    "Herbalism": 29,
+    "Leatherworking": 58,
+    "Mining": 28,
+    "Skinning": 17,
+    "Tailoring": 50
+  },
+  "providerCommit": "e0a6eaa86f181ac99262e34126bcd2ed1a1712d6",
+  "providerVersion": "1.0.5",
+  "scope": "Installed Forever baked base artifact; before runtime corrections, map projection, and eligibility checks",
+  "serviceFlags": {
+    "auctioneer": 30,
+    "trainer": 499
+  },
+  "tocSHA256": "d2ae0f70de2d3296ef50388ae5fdf3640975654895056bbd2325882806f4adcb"
+}
