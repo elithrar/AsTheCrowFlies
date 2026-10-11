@@ -175,7 +175,12 @@ function M.RouteLegs(route,speed)
     local before,after,flight=0,0,0;local first,last
     for _,leg in ipairs(route.legs) do
         if leg.mode=="flight" then first=first or leg;last=leg;flight=flight+(leg.seconds or leg.distance/32)
-        elseif first then after=after+M.GroundSeconds(leg.distance,speed,leg.quality) else before=before+M.GroundSeconds(leg.distance,speed,leg.quality) end
+        else
+            -- Route cards share their planned total's timing snapshot. Live
+            -- remaining guidance recalculates ground time in Navigation.lua.
+            local seconds=leg.seconds or M.GroundSeconds(leg.distance,speed,leg.quality)
+            if first then after=after+seconds else before=before+seconds end
+        end
     end
     if not first then return "Walk (~"..M.Minutes(before)..")" end
     return "Walk (~"..M.Minutes(before)..")\n"..(first.start.name or "Departure").." to "..(last.finish.name or "Arrival").." (~"..M.Minutes(flight)..")\nWalk (~"..M.Minutes(after)..")"
@@ -190,6 +195,14 @@ function M.Vector(a,b,facing)
         return east*c+north*s,north*c-east*s
     end
     return east,north
+end
+local compass={"N","NNE","NE","ENE","E","ESE","SE","SSE","S","SSW","SW","WSW","W","WNW","NW","NNW"}
+-- World bearing stays independent of the player's facing and rotating arrow.
+function M.Cardinal(a,b)
+    local east,north=M.Vector(a,b,nil)
+    if not east or (east==0 and north==0) then return nil end
+    local sector=math.floor((math.atan2(east,north)+math.pi/16)/(math.pi/8))%16
+    return compass[sector+1]
 end
 function M.Minimap(east,north,radius,width,height,shape)
     if not M.Number(radius) or radius<=0 then return nil end

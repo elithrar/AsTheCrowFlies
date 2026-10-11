@@ -17,6 +17,32 @@ test('cardinal bearings and rotation',function()
     local x,y,clip=M.Minimap(100,100,50,200,200,'ROUND');assert(clip and math.abs(x^2+y^2-90^2)<1e-6)
     x,y=M.Minimap(100,100,50,200,200,'SQUARE');assert(x==90 and y==90)
 end)
+test('sixteen point compass uses world north across quadrants and sector boundaries',function()
+    local origin=pos(700,-300)
+    local function target(degrees)
+        local angle=degrees*math.pi/180
+        return pos(origin.x+100*math.cos(angle),origin.y-100*math.sin(angle))
+    end
+    local labels={'N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'}
+    for i,label in ipairs(labels) do
+        local center=(i-1)*22.5
+        assert(M.Cardinal(origin,target(center))==label)
+        assert(M.Cardinal(origin,target(center+11.25-.00001))==label)
+        assert(M.Cardinal(origin,target(center+11.25+.00001))==labels[i%16+1])
+    end
+    local east,north=M.Vector(origin,target(90),math.pi/2)
+    assert(math.abs(east)<1e-6 and north<0 and M.Cardinal(origin,target(90))=='E')
+end)
+
+test('compass omits coincident unavailable and other-continent positions',function()
+    assert(not M.Cardinal(pos(0),pos(0)))
+    assert(not M.Cardinal(nil,pos(100)) and not M.Cardinal(pos(0),nil))
+    assert(not M.Cardinal(pos(0),pos(0/0)))
+    local other=pos(100);other.map=1;assert(not M.Cardinal(pos(0),other))
+    local differentFloor=pos(100);differentFloor.uiMapID=2
+    assert(M.Cardinal(pos(0),differentFloor)=='N')
+end)
+
 test('flight polyline clips crossing segments without inventing ground paths',function()
     local x1,y1,x2,y2=M.ClipSegment(-1,.5,2,.5);assert(x1==0 and y1==.5 and x2==1 and y2==.5)
     assert(not M.ClipSegment(-1,-1,-.5,-.5));assert(not M.ClipSegment(0/0,0,1,1))
@@ -258,6 +284,16 @@ test('bearing ETA stays consistent across cost summary display and remaining tra
     distance,eta=V.Remaining(state,pos(175),7,10);assert(distance==1525 and eta==191.25)
     _,eta=V.Remaining(state,pos(0),14,10);assert(eta==157.5)
     assert(not before.seconds and not flight.seconds)
+end)
+
+test('route cards retain planned ground timing while remaining guidance uses live speed',function()
+    local origin,goal=pos(0),pos(700,0,'goal')
+    local leg={mode='walk',distance=700,quality='bearing',start=origin,finish=goal}
+    local route=R.Summary({leg},goal,ctx)
+    assert(route.eta==135 and M.RouteLegs(route,14)=='Walk (~2 min)')
+    local state=V.New();assert(V.Start(state,route,origin,0))
+    local _,seconds=V.Remaining(state,origin,14,0);assert(seconds==67.5)
+    assert(M.RouteLegs({legs={leg}},14)=='Walk (~1 min)' and not leg.seconds)
 end)
 
 test('route metadata remains isolated while immutable flight geometry is shared',function()

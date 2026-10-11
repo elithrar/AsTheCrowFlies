@@ -37,11 +37,28 @@ function C:Reindex()
         if known and known.state=="known" then self.destinations[#self.destinations+1]=p end
     end
 end
-function C:Refresh() if N.UI.frame then N.UI:Refresh(self) end end
+function C:Refresh()
+    if N.UI.frame then N.UI:Refresh(self) end
+    if self.ready then N.Overlay:Update(self,A.Position(),self.ctx or self:Context()) end
+end
+function C:RefreshAppearance(retryFonts)
+    if self.refreshingAppearance then return end;self.refreshingAppearance=true
+    if retryFonts then N.UI:ResetFonts() end
+    for _=1,3 do
+        local revision=N.UI.fontRevision
+        N.UI:RefreshFonts()
+        if N.Options.frame then N.Options:Refresh(true) end
+        -- Menu generation or native widget states can replace a font. Repair
+        -- those after updating controls, then measure with the settled family.
+        N.UI:RefreshFonts();N.UI:ApplyAppearance();self:Refresh()
+        if N.Options.frame then N.Options:Layout() end
+        if revision==N.UI.fontRevision then break end
+    end
+    self.refreshingAppearance=false
+end
 function C:ApplyProfile()
     if not self.readOnly then AsTheCrowFliesDB=self.profile end
-    N.UI:RefreshFonts();N.UI:ApplyAppearance();self:Refresh()
-    if N.Options.frame then N.Options:Refresh() end
+    self:RefreshAppearance(true)
 end
 function C:ShowPanel(show)
     self.hidden=not show;if show then self.tucked=false end
@@ -70,12 +87,15 @@ function C:Back()
     else self.tucked=true end
     self:Refresh()
 end
+function C:SearchPosition(origin)
+    return not origin and self.origin or A.Position()
+end
 function C:Search(query,origin)
     if origin then self.originQuery=query else self.query=query end
     self.searchGeneration=self.searchGeneration+1;local generation=self.searchGeneration;self.matches=nil;self.results={};self.searching=true;self.searchOrigin=origin;self:Refresh()
     local function run()
         if generation~=self.searchGeneration then return end
-        self.searching=nil;self.matches=M.Search(self.destinations,query,origin and {} or self.filter,self:Context(),40,A.Position());self.highlight=1;self.searchOrigin=origin;self.status=nil;self:Refresh()
+        self.searching=nil;self.matches=M.Search(self.destinations,query,origin and {} or self.filter,self:Context(),40,self:SearchPosition(origin));self.highlight=1;self.searchOrigin=origin;self.status=nil;self:Refresh()
     end
     if C_Timer and C_Timer.After then C_Timer.After(.12,run) else run() end
 end
@@ -213,7 +233,7 @@ function C:Initialize()
     for _,id in ipairs(self.data.taxiMaps or {}) do A.ObserveMap(id,self.character,self.data.nodes) end
     self:Context();self:Reindex();self.ready=true
     N.UI:Create(self);N.Overlay:Create();N.Options:Create(self)
-    N.UI:WatchFonts();N.UI:ApplyAppearance()
+    N.UI:WatchFonts();self:RefreshAppearance(false)
     self.status=self.character.intent and "Previous route stopped on reload. Choose a destination to resume." or nil
     if self.build~=N.Data.build then self.status="Unvalidated client build: flight data disabled" end
     self:Refresh()
@@ -232,7 +252,7 @@ function C:Initialize()
     end
 end
 local frame=CreateFrame("Frame");C.events=frame
-for _,event in ipairs({"ADDON_LOADED","TAXIMAP_OPENED","TAXIMAP_CLOSED","PLAYER_ENTERING_WORLD","PLAYER_LOGOUT","UI_SCALE_CHANGED","DISPLAY_SIZE_CHANGED"}) do frame:RegisterEvent(event) end
+for _,event in ipairs({"ADDON_LOADED","TAXIMAP_OPENED","TAXIMAP_CLOSED","PLAYER_LOGIN","PLAYER_ENTERING_WORLD","PLAYER_LOGOUT","UI_SCALE_CHANGED","DISPLAY_SIZE_CHANGED"}) do frame:RegisterEvent(event) end
 frame:SetScript("OnEvent",function(_,event,arg)
     if event=="ADDON_LOADED" and arg==ADDON then C:Initialize()
     elseif C.ready then
@@ -244,11 +264,14 @@ frame:SetScript("OnEvent",function(_,event,arg)
                 if route then for _,edge in ipairs(route.legs) do if edge.mode=="flight" then edge.offered=false;route.conditional=true end end end
             end
             for _,route in ipairs(C.results) do invalidate(route) end;invalidate(C.nav.route);C:Refresh()
+        elseif event=="PLAYER_LOGIN" then
+            C_Timer.After(0,function() C:RefreshAppearance(false) end)
         elseif event=="PLAYER_ENTERING_WORLD" then
             C.nav.measure=nil;C.nav.previous=nil
             local p=A.Position();if p then A.ObserveMap(p.uiMapID,C.character,C.data.nodes);C:Reindex();if #C.results>0 then C:Plan() end end
+            C:RefreshAppearance(false)
         elseif event=="PLAYER_LOGOUT" then if C.ticker then C.ticker:Cancel() end
-        elseif event=="UI_SCALE_CHANGED" or event=="DISPLAY_SIZE_CHANGED" then C:Refresh() end
+        elseif event=="UI_SCALE_CHANGED" or event=="DISPLAY_SIZE_CHANGED" then C:RefreshAppearance(false) end
     end
 end)
 SLASH_ASTHECROWFLIES1="/atcf"

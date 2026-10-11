@@ -1,33 +1,101 @@
 local _,N=...;local M=N.Model;local U={texts={}};N.UI=U
 local MEDIA="Interface\\AddOns\\AsTheCrowFlies\\Media\\"
 local accent={.78,.85,.61};local ink={.93,.94,.97}
-function U:Font(object,size)
-    local baseSize=size;size=object.atcfFixedFont and size or math.max(9,size+((self.owner and self.owner.profile.fontSize) or 13)-13)
-    local path=STANDARD_TEXT_FONT or "Fonts\\FRIZQT__.TTF"
+-- One checked family for all owned text, including native option controls.
+-- Native font heights are uiUnits: cache their readback, not an exact size echo.
+U.fontRevision=0
+local function samePath(a,b)
+    return type(a)=="string" and type(b)=="string" and a:gsub("/","\\"):lower()==b:gsub("/","\\"):lower()
+end
+local function setFont(object,path,size,flags)
+    local ok,result=pcall(object.SetFont,object,path,size,flags or "")
+    if not ok or result==false then return false end
+    local actual,height=object:GetFont()
+    return samePath(actual,path) and type(height)=="number" and height>0
+end
+function U:ResetFonts() self.fontResolution=nil end
+function U:ResolveFont()
+    local fallback=STANDARD_TEXT_FONT or "Fonts\\FRIZQT__.TTF"
     local pref=self.owner and self.owner.profile.font or "Expressway"
     local lsm=LibStub and LibStub("LibSharedMedia-3.0",true)
-    if pref=="Arial" then path="Fonts\\ARIALN.TTF"
-    elseif lsm and lsm:IsValid("font",pref) then path=lsm:Fetch("font",pref) end
-    if not self.fontProbe then self.fontProbe=UIParent:CreateFontString(nil,"OVERLAY");self.fontProbe:Hide() end
-    local valid,loaded=pcall(self.fontProbe.SetFont,self.fontProbe,path,12,"")
-    local actual=self.fontProbe:GetFont()
-    if not valid or loaded==false or type(actual)~="string" or actual:gsub("/","\\"):lower()~=path:gsub("/","\\"):lower() then path=STANDARD_TEXT_FONT or "Fonts\\FRIZQT__.TTF" end
-    local ok,result=pcall(object.SetFont,object,path,size,"")
-    if not ok or result==false then object:SetFontObject(GameFontNormal) end
-    self.fontObjects=self.fontObjects or {};if not self.fontObjects[object] then self.texts[#self.texts+1]={object,baseSize};self.fontObjects[object]=true end;return object
+    local requested=pref=="Arial" and "Fonts\\ARIALN.TTF" or fallback
+    if pref~="Arial" and pref~="Game font" and lsm and lsm:IsValid("font",pref) then requested=lsm:Fetch("font",pref) end
+    if type(requested)~="string" or requested=="" then requested=fallback end
+    local key=pref..":"..requested..":"..fallback
+    local state=self.fontResolution
+    if not state or state.key~=key or state.library~=lsm then
+        if not self.fontProbe then self.fontProbe=UIParent:CreateFontString(nil,"OVERLAY");self.fontProbe:Hide() end
+        state={key=key,library=lsm,path=setFont(self.fontProbe,requested,12) and requested or fallback,default=fallback}
+        if state.path==requested and lsm and lsm:IsValid("font",pref.." Bold") then
+            local bold=lsm:Fetch("font",pref.." Bold")
+            if type(bold)=="string" and bold~=requested and setFont(self.fontProbe,bold,12) then state.bold=bold end
+        end
+        self.fontResolution=state;self.fontRevision=self.fontRevision+1
+    end
+    return state
+end
+function U:Font(object,baseSize)
+    self.fontObjects=self.fontObjects or {}
+    local entry=self.fontObjects[object]
+    if not entry then entry={object,baseSize};self.texts[#self.texts+1]=entry;self.fontObjects[object]=entry else entry[2]=baseSize end
+    local size=(object.atcfFixedFont and baseSize or math.max(9,baseSize+((self.owner and self.owner.profile.fontSize) or 13)-13))*(object.atcfFontScale or 1)
+    local state=self:ResolveFont();local path=object.atcfEmphasis and state.bold or state.path
+    local fontFlags=object.atcfEmphasis and not state.bold and "OUTLINE" or ""
+    local actual,height,flags=object:GetFont()
+    local changed=actual~=object.atcfFontPath or height~=object.atcfFontHeight or flags~=object.atcfFontFlags
+    local key=path..":"..size..":"..fontFlags
+    if state.native then
+        if object.atcfNativeFont~=state.native or changed then object:SetFontObject(state.native) end
+        object.atcfNativeFont=state.native;object.atcfFontKey=nil
+    elseif object.atcfFontKey~=key or changed then
+        object.atcfNativeFont=nil
+        local applied=setFont(object,path,size,fontFlags)
+        if not applied and state.bold and path==state.bold then
+            state.bold=nil;self.fontRevision=self.fontRevision+1;path=state.path;fontFlags="OUTLINE"
+            applied=setFont(object,path,size,fontFlags)
+        end
+        if not applied then
+            -- A late per-control rejection downgrades the entire family. The
+            -- refresh pass replays earlier objects before doing final layout.
+            if state.path~=state.default or state.bold then state.path=state.default;state.bold=nil;self.fontRevision=self.fontRevision+1 end
+            path=state.path;fontFlags=object.atcfEmphasis and "OUTLINE" or ""
+            if not setFont(object,path,size,fontFlags) then
+                state.native=GameFontNormal or GameTooltipText;self.fontRevision=self.fontRevision+1
+                object:SetFontObject(state.native);object.atcfNativeFont=state.native
+                local nativePath=object:GetFont();state.path=nativePath or state.default
+            end
+        end
+        object.atcfFontKey=not state.native and (path..":"..size..":"..fontFlags) or nil
+    end
+    object.atcfFontPath,object.atcfFontHeight,object.atcfFontFlags=object:GetFont()
+    return object
 end
 function U:RefreshFonts()
-    for _,v in ipairs(self.texts) do self:Font(v[1],v[2]) end
-    for _,d in ipairs(self.dropdowns or {}) do d:GenerateMenu() end
+    for _=1,3 do
+        local revision=self.fontRevision
+        for _,v in ipairs(self.texts) do self:Font(v[1],v[2]) end
+        if revision==self.fontRevision then break end
+    end
+end
+function U:SyncMenus()
+    local path,size,flags=self.menuFont:GetFont();local key=tostring(path)..":"..tostring(size)..":"..tostring(flags)
+    for _,d in ipairs(self.dropdowns or {}) do
+        -- Native generated selection text overrides SetDefaultText. Refresh
+        -- after values change, never before a profile switch's new values.
+        if d.atcfMenuFont~=key or d.atcfSelectionValue~=d.value then
+            d:GenerateMenu();d.atcfMenuFont=key;d.atcfSelectionValue=d.value
+        end
+    end
 end
 function U:WatchFonts()
     local lsm=LibStub and LibStub("LibSharedMedia-3.0",true)
     if not lsm or self.fontLibrary==lsm or not lsm.RegisterCallback then return end
     self.fontLibrary=lsm
-    local changed=function(_,kind) if kind=="font" then self:RefreshFonts();self:Refresh(self.owner);if N.Options.frame then N.Options:Refresh() end end end
-    lsm.RegisterCallback(self,"LibSharedMedia_Registered",changed);lsm.RegisterCallback(self,"LibSharedMedia_SetGlobal",changed)
-    self:RefreshFonts()
+    self.fontChanged=self.fontChanged or function(_,kind) if kind=="font" and self.owner then self.owner:RefreshAppearance(true) end end
+    lsm.RegisterCallback(self,"LibSharedMedia_Registered",self.fontChanged);lsm.RegisterCallback(self,"LibSharedMedia_SetGlobal",self.fontChanged)
+    self.fontChanged(nil,"font")
 end
+
 function U:ClassLabel(token)
     if not token then return "Class trainer" end
     return (LOCALIZED_CLASS_NAMES_MALE and LOCALIZED_CLASS_NAMES_MALE[token]) or (LOCALIZED_CLASS_NAMES_FEMALE and LOCALIZED_CLASS_NAMES_FEMALE[token]) or token:sub(1,1)..token:sub(2):lower()
@@ -57,14 +125,21 @@ function U:ApplyAppearance()
     if not colors then return end
     for _,surface in ipairs(self.backgrounds or {}) do surface:SetVertexColor(colors.background[1],colors.background[2],colors.background[3],.97) end
     for _,entry in ipairs(self.texts) do if not entry[1].atcfOptions then entry[1]:SetTextColor(unpack(colors.text)) end end
-    for _,row in ipairs(self.rows or {}) do row.lockedText:SetTextColor(.95,.25,.25) end
+    for _,row in ipairs(self.rows or {}) do row.name:SetTextColor(1,.82,0);row.lockedText:SetTextColor(.95,.25,.25) end
+    if self.next then self.next:SetTextColor(1,.82,0) end
     if self.eagle then self.eagle:SetVertexColor(.88,.66,.16) end
     if self.arrow then self.arrow:SetVertexColor(unpack(colors.accent)) end
+end
+function U:Rectangle(f,color)
+    local texture=f:CreateTexture(nil,"BACKGROUND");texture:SetAllPoints(f);texture:SetColorTexture(1,1,1,1)
+    texture:SetVertexColor(unpack(color or {.045,.048,.062,.97}))
+    if not color then self.backgrounds=self.backgrounds or {};self.backgrounds[#self.backgrounds+1]=texture end
+    return texture
 end
 function U:Button(parent,label,x,y,w,h,callback)
     local b=CreateFrame("Button",nil,parent);b:SetPoint("TOPLEFT",x,y);b:SetSize(w,h or 28)
     local inset=w<40 and 2 or 8
-    b.bg=self:Surface(b,{.13,.14,.17,1});b.text=self:Text(b,label,12,inset,0,w-inset*2,h or 28);b.text:SetJustifyH("CENTER")
+    b.bg=self:Rectangle(b,{.13,.14,.17,1});b.text=self:Text(b,label,12,inset,0,w-inset*2,h or 28);b.text:SetJustifyH("CENTER")
     b.normalColor={.13,.14,.17,1};b.hoverColor={.22,.24,.28,1}
     b:SetScript("OnClick",callback);b:SetScript("OnEnter",function() b.bg:SetVertexColor(unpack(b.hoverColor)) end);b:SetScript("OnLeave",function() b.bg:SetVertexColor(unpack(b.normalColor)) end)
     return b
@@ -83,9 +158,13 @@ function U:Icon(b,kind)
             l:SetStartPoint("CENTER",icon,x1,y1);l:SetEndPoint("CENTER",icon,x2,y2)
         end
         if kind=="cog" then
-            local points={};for i=0,31 do local a=i*math.pi/16;local r=(i%4==1 or i%4==2) and 8 or 6;points[i+1]={math.cos(a)*r,math.sin(a)*r} end
-            for i,p in ipairs(points) do local q=points[i%#points+1];line(p[1],p[2],q[1],q[2],1.5) end
-            for i=0,15 do local a,b=i*math.pi/8,(i+1)*math.pi/8;line(math.cos(a)*2.5,math.sin(a)*2.5,math.cos(b)*2.5,math.sin(b)*2.5,1.5) end
+            local texture=icon:CreateTexture(nil,"ARTWORK");texture:SetAllPoints(icon);texture:SetTexture(MEDIA.."cog.tga");texture:SetVertexColor(.95,.96,.98,1);icon.texture=texture
+        elseif kind=="back" then
+            line(5,6,5,-1,2.8);line(5,-1,3,-3,2.8);line(3,-3,-6,-3,2.8)
+            line(-6,-3,-1,2,2.8);line(-6,-3,-1,-8,2.8)
+        elseif kind=="left" or kind=="right" then
+            local sign=kind=="left" and 1 or -1
+            for x=-5,5 do local height=(x+5)*.7;line(x*sign,-height,x*sign,height,1.5) end
         elseif kind=="pause" then line(-3,5,-3,-5,3);line(3,5,3,-5,3)
         elseif kind=="play" then line(-4,6,5,0);line(5,0,-4,-6);line(-4,-6,-4,6)
         elseif kind=="done" then line(-6,0,-2,-4);line(-2,-4,6,5)
@@ -106,6 +185,24 @@ function U:WrappedHeight(text,minimum)
     text:SetHeight(0)
     local scale=self.frame:GetEffectiveScale();local height=math.max(minimum or 0,math.ceil(text:GetStringHeight()*scale+4)/scale)
     text:SetHeight(height);return height
+end
+function U:ListingDistance(distance,seconds)
+    if not M.Number(distance) then return "Distance unavailable" end
+    local yards=distance>=1000 and string.format("%.1fk",distance/1000) or string.format("%.0f",distance)
+    local time=""
+    if M.Number(seconds) then
+        local minutes=math.max(1,math.floor(seconds/60+.5))
+        time=" (est. "..(seconds<60 and "<1 minute" or minutes..(minutes==1 and " minute" or " minutes"))..")"
+    end
+    return "Distance: ~"..yards.." yards"..time
+end
+function U:SavePlacement(c)
+    local left,top=self.frame:GetLeft(),self.frame:GetTop()
+    if left and top then c.profile.x=left;c.profile.y=top-UIParent:GetHeight()/self.frame:GetScale() end
+end
+function U:FinishResize(c)
+    if not self.resizing then return end
+    self.frame:StopMovingOrSizing();self:SavePlacement(c);self.resizing=false
 end
 function U:ScrollIndicator(offset)
     local range=self.bodyScrollRange or 0;local visible=self.bodyScroll:GetHeight()
@@ -130,7 +227,7 @@ end
 function U:FilterMenu(parent,c)
     -- The intrinsic DropdownButton owns mouse dismissal, Escape and menu input.
     local d=CreateFrame("DropdownButton",nil,parent);self.filterButton=d
-    d:SetPoint("TOPLEFT",c.profile.width-36,-42);d:SetSize(24,28);self:Surface(d,{.13,.14,.17,1})
+    d:SetPoint("TOPLEFT",c.profile.width-38,-42);d:SetSize(24,28);self:Rectangle(d,{.13,.14,.17,1})
     self.filterLines={}
     local points={{5,7},{19,7},{14,14},{14,21},{10,23},{10,14},{5,7}}
     for i=1,#points-1 do
@@ -165,8 +262,9 @@ function U:FilterMenu(parent,c)
     return d
 end
 function U:Edit(parent,label,y,origin)
-    self:Text(parent,label,11,14,y,48,32):SetTextColor(.65,.68,.73)
-    local e=CreateFrame("EditBox",nil,parent);e:SetPoint("TOPLEFT",62,y);e:SetSize(self.owner.profile.width-102,32);e:SetAutoFocus(false);e:SetMaxLetters(100)
+    local caption=self:Text(parent,label,12,14,y,44,32);caption:SetTextColor(.65,.68,.73)
+    self.fieldLabels=self.fieldLabels or {};self.fieldLabels[#self.fieldLabels+1]=caption
+    local e=CreateFrame("EditBox",nil,parent);e:SetPoint("TOPLEFT",62,y);e:SetSize(self.owner.profile.width-104,32);e:SetAutoFocus(false);e:SetMaxLetters(100)
     self:Surface(e,{.09,.10,.125,1});self:Font(e,13);e:SetTextInsets(8,8,0,0)
     e:SetScript("OnTextChanged",function(_,user)
         if user then
@@ -189,14 +287,14 @@ function U:Edit(parent,label,y,origin)
 end
 function U:Create(c)
     self.owner=c;local f=CreateFrame("Frame","AsTheCrowFliesPanel",UIParent);self.frame=f
-    f:SetMovable(true);f:EnableMouse(true);f:SetClampedToScreen(true);f:SetFrameStrata("MEDIUM");self:Surface(f)
+    f:SetMovable(true);f:SetResizable(true);f:EnableMouse(true);f:SetClampedToScreen(true);f:SetFrameStrata("MEDIUM");self:Surface(f)
     local header=CreateFrame("Frame",nil,f);self.header=header;header:SetPoint("TOPLEFT");header:SetSize(c.profile.width-78,44);header:EnableMouse(true);header:RegisterForDrag("LeftButton")
-    header:SetScript("OnDragStart",function() if not c.profile.locked then self.dragging=true;f:StartMoving() end end)
+    header:SetScript("OnDragStart",function() if not c.profile.locked and not self.resizing then self.dragging=true;f:StartMoving() end end)
     header:SetScript("OnDragStop",function()
         if not self.dragging then return end;self.dragging=false
         f:StopMovingOrSizing()
         local left,top=f:GetLeft(),f:GetTop();local scale=f:GetScale();local screen=UIParent:GetWidth()/scale
-        c.profile.x=left;c.profile.y=top-UIParent:GetHeight()/scale;c.profile.dock=left<24 and "left" or (left+c.profile.width>screen-24 and "right" or "none")
+        self:SavePlacement(c);c.profile.dock=left<24 and "left" or (left+c.profile.width>screen-24 and "right" or "none")
         c.tucked=c.profile.dock~="none"
         self:Layout(c)
     end)
@@ -206,11 +304,11 @@ function U:Create(c)
     self.settings=self:Button(f,"...",c.profile.width-68,-9,26,26,function() self.menu:SetShown(not self.menu:IsShown()) end)
     self:Icon(self.settings,"cog")
     self.settings:SetFrameLevel(header:GetFrameLevel()+3);self:Tip(self.settings,"Navigation menu")
-    self.tuck=self:Button(f,"<",c.profile.width-38,-9,24,26,function() c:Back() end)
+    self.tuck=self:Button(f,"",c.profile.width-38,-9,24,26,function() c:Back() end);self:Icon(self.tuck,"back")
     self.tuck:SetFrameLevel(header:GetFrameLevel()+3);self:Tip(self.tuck,"Back to the previous view")
     self.editor=CreateFrame("Frame",nil,f);self.editor:SetPoint("TOPLEFT",0,-45);self.editor:SetPoint("TOPRIGHT",0,-45);self.editor:SetHeight(76)
     self.from=self:Edit(self.editor,"From",0,true);self.to=self:Edit(self.editor,"To",-40,false)
-    self.current=self:Button(self.editor,"@",c.profile.width-34,-2,22,28,function() c:Edit(true);c.origin=nil;self.from:SetText("Current location");c:Refresh() end)
+    self.current=self:Button(self.editor,"@",c.profile.width-38,-2,24,28,function() c:Edit(true);c.origin=nil;self.from:SetText("Current location");c:Refresh() end)
     self:Tip(self.current,"Reset origin to your current location")
     self:FilterMenu(self.editor,c)
     self.bodyScroll=CreateFrame("ScrollFrame",nil,f);self.bodyScroll:SetPoint("TOPLEFT",14,-125);self.bodyScroll:SetWidth(c.profile.width-28)
@@ -219,13 +317,17 @@ function U:Create(c)
     self.scrollThumb=f:CreateTexture(nil,"OVERLAY");self.scrollThumb:SetWidth(2);self.scrollThumb:SetColorTexture(.7,.7,.72,1);self.scrollThumb:Hide()
     self.bodyScroll:SetScript("OnVerticalScroll",function(_,offset) self:ScrollIndicator(offset) end)
     self.rows={}
-    for i=1,3 do
+    for i=1,40 do
         local b=self:Button(self.body,"",0,-(i-1)*83,c.profile.width-28,77,function()
-            if c.matches then local index=(c.matchOffset or 0)+i;c:Choose(c.matches[index],c.searchOrigin)
+            if c.matches then c:Choose(c.matches[i],c.searchOrigin)
             else c.selected=i;c:Refresh() end
         end)
         b.text:Hide();b.name=self:Text(b,"",13,10,-6,c.profile.width-50,21);b.name:SetWordWrap(true);b.name:SetNonSpaceWrap(true);b.name:SetJustifyV("TOP")
         b.detail=self:Text(b,"",11,10,-27,c.profile.width-50,41);b.detail:SetWordWrap(true);b.detail:SetNonSpaceWrap(true);b.detail:SetJustifyV("TOP")
+        b.distance=self:Text(b,"",11,10,-44,c.profile.width-50,16);b.distance:SetWordWrap(true);b.distance:SetJustifyV("TOP")
+        b.itinerary=self:Text(b,"",11,10,-62,c.profile.width-50,16);b.itinerary:SetWordWrap(true);b.itinerary:SetNonSpaceWrap(true);b.itinerary:SetJustifyV("TOP");b.itinerary:Hide()
+        b.name.atcfEmphasis=true;self:Font(b.name,13);b.name:SetTextColor(1,.82,0)
+        b.detail.atcfEmphasis=true;self:Font(b.detail,12)
         b.go=self:Button(b,"Go",c.profile.width-80,-23,44,30,function()
             if not c.matches and c.results[i] and not c.results[i].unavailable then c.selected=i;c:Go() end
         end);b.go:Hide()
@@ -239,8 +341,7 @@ function U:Create(c)
     local function scroll(_,delta)
         local old=self.bodyScroll:GetVerticalScroll();local range=self.bodyScrollRange or 0
         local next=math.max(0,math.min(range,old-delta*40))
-        if next~=old then self.bodyScroll:SetVerticalScroll(next);return end
-        if c.matches then c.highlight=math.max(1,math.min(#c.matches,(c.highlight or 1)-delta));c:Refresh() end
+        if next~=old then self.bodyScroll:SetVerticalScroll(next);self:ScrollIndicator(next) end
     end
     self.body:EnableMouseWheel(true);self.body:SetScript("OnMouseWheel",scroll);self.bodyScroll:EnableMouseWheel(true);self.bodyScroll:SetScript("OnMouseWheel",scroll)
     self.note=self:Text(f,"",11,14,-200,c.profile.width-28,44);self.note:SetWordWrap(true);self.note:SetJustifyH("CENTER");self.note:SetTextColor(.68,.71,.76)
@@ -248,20 +349,44 @@ function U:Create(c)
     self.stop=self:Button(f,"",c.profile.width-42,-246,28,28,function() c:Stop() end);self:Icon(self.stop,"close");self:ButtonColor(self.stop,{.52,.12,.14,1},{.70,.18,.20,1});self:Tip(self.stop,"Stop navigation")
     self.guidance=CreateFrame("Frame",nil,f);self.guidance:SetPoint("TOPLEFT",14,-48);self.guidance:SetSize(c.profile.width-28,94)
     self.arrow=self.guidance:CreateTexture(nil,"ARTWORK");self.arrow:SetTexture(MEDIA.."arrow.tga");self.arrow:SetPoint("TOPLEFT",0,-4);self.arrow:SetSize(32,32);self.arrow:SetVertexColor(unpack(accent))
-    self.next=self:Text(self.guidance,"",13,42,0,c.profile.width-70,25)
+    self.next=self:Text(self.guidance,"",13,44,0,c.profile.width-72,25);self.next.atcfEmphasis=true;self.next.atcfFontScale=1.1;self:Font(self.next,13);self.next:SetTextColor(1,.82,0)
     self.next:SetWordWrap(true);self.next:SetNonSpaceWrap(true);self.next:SetJustifyV("TOP")
-    self.remaining=self:Text(self.guidance,"",11,42,-25,c.profile.width-70,20)
+    self.cardinal=self:Text(self.guidance,"",11,0,-39,32,16);self.cardinal:SetJustifyH("CENTER")
+    self.remaining=self:Text(self.guidance,"",11,44,-25,c.profile.width-72,20);self.remaining.atcfFontScale=1.1;self:Font(self.remaining,11)
     self.remaining:SetWordWrap(true);self.remaining:SetJustifyV("TOP")
-    self.directionNote=self:Text(self.guidance,"",11,0,-51,c.profile.width-28,38);self.directionNote:SetWordWrap(true)
+    self.directionNote=self:Text(self.guidance,"",11,0,-61,c.profile.width-28,38);self.directionNote.atcfFontScale=1.1;self:Font(self.directionNote,11);self.directionNote:SetWordWrap(true)
     self.expand=self:Button(f,"Edit / routes",14,-147,c.profile.width-154,28,function() c.compact=false;c:Refresh() end)
+    self.expand.text.atcfFontScale=1.1;self:Font(self.expand.text,12)
     self.pause=self:Button(f,"",c.profile.width-76,-147,28,28,function()
         if c.nav.state=="nearby" then c.nav.state="arrived";c.nav.message="Arrival confirmed";c.character.intent=nil
         else c.manualPause=not c.manualPause;c.nav.measure=nil;c.nav.dwell=nil;c.nav.previous=nil;c.nav.previousTime=nil end;c:Refresh()
     end)
     self:PauseIcon(c)
     self.fold=self:Button(f,"Fold",14,-125,50,30,function() c.compact=true;c:Refresh() end)
-    local handle=CreateFrame("Button",nil,UIParent);self.handle=handle;handle:SetSize(24,64);handle:SetFrameStrata("MEDIUM");self:Surface(handle)
+    local handle=CreateFrame("Button",nil,UIParent);self.handle=handle;handle:SetSize(24,64);handle:SetFrameStrata("MEDIUM");self:Rectangle(handle)
     handle.text=self:Text(handle,">",16,0,0,24,64);handle.text:SetJustifyH("CENTER");handle:SetScript("OnClick",function() c.tucked=false;self:Layout(c) end)
+    local grip=CreateFrame("Button",nil,f);self.resizeGrip=grip;grip:SetSize(18,18);grip:SetPoint("BOTTOMRIGHT",f,"BOTTOMRIGHT",-1,1);grip:SetFrameLevel(f:GetFrameLevel()+10)
+    for _,length in ipairs({4,8,12}) do
+        local line=grip:CreateLine(nil,"ARTWORK");line:SetThickness(1.5);line:SetColorTexture(.75,.76,.8,1)
+        line:SetStartPoint("BOTTOMRIGHT",grip,-length,3);line:SetEndPoint("BOTTOMRIGHT",grip,-3,length)
+    end
+    self:Tip(grip,"Drag to resize results")
+    grip:SetScript("OnMouseDown",function(_,button)
+        if button~="LeftButton" or c.profile.locked or self.dragging or not grip:IsShown() then return end
+        self.resizeChrome=f:GetHeight()-self.bodyScroll:GetHeight();self.resizing=true
+        self:SavePlacement(c);c.profile.dock="none";f:StartSizing("BOTTOMRIGHT")
+    end)
+    grip:SetScript("OnMouseUp",function(_,button) if button=="LeftButton" and self.resizing then self:FinishResize(c);c:Refresh() end end)
+    grip:SetScript("OnHide",function() self:FinishResize(c) end)
+    f:SetScript("OnSizeChanged",function(_,width,height)
+        if not self.resizing or self.resizeLayout then return end
+        c.profile.width=math.max(280,math.min(640,width));c.profile.resultsHeight=math.max(100,math.min(560,height-self.resizeChrome))
+        self.resizeLayout=true;self:Refresh(c);self.resizeLayout=false
+    end)
+    f:SetScript("OnHide",function()
+        self:FinishResize(c)
+        if self.dragging then f:StopMovingOrSizing();self:SavePlacement(c);self.dragging=false end
+    end)
     self.from:SetText("Current location");self:Layout(c)
     local menu=CreateFrame("Frame","AsTheCrowFliesMenu",f);self.menu=menu;menu:SetPoint("TOPRIGHT",f,"TOPRIGHT",-8,-40);menu:SetSize(196,172);menu:SetFrameStrata("DIALOG");menu:SetFrameLevel(f:GetFrameLevel()+20);menu:EnableMouse(true);self:Surface(menu)
     local function action(label,y,fn)
@@ -275,29 +400,39 @@ function U:Create(c)
     UISpecialFrames=UISpecialFrames or {};table.insert(UISpecialFrames,"AsTheCrowFliesMenu")
 end
 function U:Layout(c)
-    local f,p=self.frame,c.profile;local scale=math.min(p.scale,UIParent:GetHeight()/660,UIParent:GetWidth()/(p.width+16));f:SetScale(scale);f:SetWidth(p.width);f:ClearAllPoints()
+    -- Native dragging owns the frame anchor until release. Refreshes during
+    -- guidance, indexing or font registration must not snap it back.
+    if self.dragging then return end
+    local f,p=self.frame,c.profile;local scale=self.resizing and f:GetScale() or math.min(p.scale,UIParent:GetHeight()/660,UIParent:GetWidth()/(p.width+16))
+    if not self.resizing then f:SetScale(scale);f:SetWidth(p.width);f:ClearAllPoints() end
     local function move(control,x,y) control:ClearAllPoints();control:SetPoint("TOPLEFT",x,y) end
     self.header:SetWidth(p.width-78);self.title:SetWidth(p.width-124)
-    move(self.settings,p.width-68,-9);move(self.tuck,p.width-38,-9);move(self.current,p.width-34,-2)
-    self.from:SetWidth(p.width-102);self.to:SetWidth(p.width-102);self.body:SetWidth(p.width-28);self.bodyScroll:SetWidth(p.width-28)
-    move(self.filterButton,p.width-36,-42);self.note:SetWidth(p.width-28)
+    move(self.settings,p.width-68,-9);move(self.tuck,p.width-38,-9);move(self.current,p.width-38,-2)
+    self.from:SetWidth(p.width-104);self.to:SetWidth(p.width-104);self.body:SetWidth(p.width-28);self.bodyScroll:SetWidth(p.width-28)
+    move(self.filterButton,p.width-38,-42);self.note:SetWidth(p.width-28)
     local goWidth=p.width-(c.nav.route and 124 or 88);self.go:SetWidth(goWidth);self.go.text:SetWidth(goWidth-16)
-    self.guidance:SetWidth(p.width-28);self.next:SetWidth(p.width-70);self.remaining:SetWidth(p.width-70);self.directionNote:SetWidth(p.width-28)
+    self.guidance:SetWidth(p.width-28);self.next:SetWidth(p.width-72);self.remaining:SetWidth(p.width-72);self.directionNote:SetWidth(p.width-28)
     self.expand:SetWidth(p.width-96);self.expand.text:SetWidth(p.width-112)
     for _,row in ipairs(self.rows) do row:SetWidth(p.width-28);row.lockedText:SetWidth(p.width-40) end
     local sw,sh=UIParent:GetWidth()/scale,UIParent:GetHeight()/scale
     local x=p.dock=="right" and sw-p.width-8 or p.dock=="left" and 8 or p.x
     local y=math.max(-(sh-math.min(f:GetHeight(),sh)),math.min(0,p.y))
-    f:SetPoint("TOPLEFT",UIParent,"TOPLEFT",math.max(0,math.min(sw-p.width,x)),y)
+    if not self.resizing then
+        f:SetPoint("TOPLEFT",UIParent,"TOPLEFT",math.max(0,math.min(sw-p.width,x)),y)
+        if self.resizeGrip:IsShown() then
+            local chrome=math.max(0,f:GetHeight()-self.bodyScroll:GetHeight())
+            f:SetResizeBounds(280,chrome+100,math.min(640,sw-16),math.max(chrome+100,math.min(chrome+560,sh-16)))
+        end
+    end
     self.handle:SetScale(scale);self.handle:ClearAllPoints()
     self.handle:SetPoint(p.dock=="right" and "RIGHT" or "LEFT",UIParent,p.dock=="right" and "RIGHT" or "LEFT",0,0)
-    self.handle.text:SetText(p.dock=="right" and "<" or ">");self.handle:SetShown(not c.hidden and c.tucked==true);f:SetShown(not c.hidden and not c.tucked)
+    self:Icon(self.handle,p.dock=="right" and "left" or "right");self.handle:SetShown(not c.hidden and c.tucked==true);f:SetShown(not c.hidden and not c.tucked)
 end
 function U:LayoutGuidance(c)
-    self.next:SetWidth(c.profile.width-70);self.remaining:SetWidth(c.profile.width-70);self.directionNote:SetWidth(c.profile.width-28)
+    self.next:SetWidth(c.profile.width-72);self.remaining:SetWidth(c.profile.width-72);self.directionNote:SetWidth(c.profile.width-28)
     local nameHeight=self:WrappedHeight(self.next,21)
-    self.remaining:ClearAllPoints();self.remaining:SetPoint("TOPLEFT",42,-nameHeight-3)
-    local body=math.max(40,nameHeight+3+self:WrappedHeight(self.remaining,18))
+    self.remaining:ClearAllPoints();self.remaining:SetPoint("TOPLEFT",44,-nameHeight-5)
+    local body=math.max(self.cardinal:IsShown() and 57 or 40,nameHeight+5+self:WrappedHeight(self.remaining,18))
     local message=self.directionNote:GetText() or "";self.directionNote:SetShown(message~="")
     self.directionNote:ClearAllPoints();self.directionNote:SetPoint("TOPLEFT",0,-body-6)
     if message~="" then body=body+6+self:WrappedHeight(self.directionNote,16) end
@@ -312,6 +447,7 @@ function U:Refresh(c)
     if self.menuLock then self.menuLock.text:SetText(c.profile.locked and "Unlock panel" or "Lock panel") end
     local compact=c.compact and c.nav.route~=nil
     local expanded=c.searching or c.matches~=nil or c.destination~=nil or #c.results>0 or c.nav.route~=nil or c.planned
+    self.resizeGrip:SetShown(not c.profile.locked and not compact and expanded and ((c.matches and #c.matches>0) or #c.results>0))
     self.editor:SetShown(not compact);self.body:SetShown(not compact and expanded);self.bodyScroll:SetShown(not compact and expanded);self.guidance:SetShown(compact);self.expand:SetShown(compact);self.go:SetShown(not compact and expanded and (c.matches~=nil or #c.results==0));self.note:SetShown(not compact and expanded)
     self:ScrollIndicator(self.bodyScroll:GetVerticalScroll())
     self.stop:SetShown(c.nav.route~=nil);self.fold:SetShown(not compact and c.nav.route~=nil)
@@ -322,33 +458,38 @@ function U:Refresh(c)
     if not self.to:HasFocus() then self.to:SetText(c.destination and c.destination.name or c.query or "") end
     if compact then self:Guidance(c,N.Adapter.Position(),c:Context(),GetTime());self:LayoutGuidance(c)
     else
-        local count=math.min(3,c.matches and #c.matches or #c.results);local offset=math.max(0,(c.highlight or 1)-3);c.matchOffset=offset;local bodyHeight=0
+        local bodyHeight=0;local origin=c:SearchPosition(c.searchOrigin)
+        local categories={class="Class trainer",profession="Profession trainer",trainer="Trainer",auction="Auction house",quest="Quest NPC",flight="Flight point",place="Saved place"}
         for i,b in ipairs(self.rows) do
-            local item=c.matches and c.matches[offset+i] or c.results[i];b:SetShown(item~=nil)
+            local item=c.matches and c.matches[i] or c.results[i];b:SetShown(item~=nil)
             b.go:SetShown(item~=nil and not c.matches)
             b.go:SetEnabled(item~=nil and not c.matches and not item.unavailable)
             b.locked:SetShown(item~=nil and not c.matches and item.unavailable=="undiscovered")
             b.lockedText:SetTextColor(.95,.25,.25)
-            b.name:SetWidth(c.profile.width-(c.matches and 50 or 100));b.detail:SetWidth(c.profile.width-(c.matches and 50 or 100))
+            local width=c.profile.width-(c.matches and 50 or 100)
+            b.name:SetWidth(width);b.detail:SetWidth(width);b.distance:SetWidth(width);b.itinerary:SetWidth(width);b.itinerary:SetShown(item~=nil and not c.matches)
             if item then
+                local destination=c.matches and item or item.destination
+                b.name:SetText(destination.name);b.name:SetTextColor(1,.82,0)
+                b.detail:SetText((destination.role or categories[destination.category] or "Destination")..(destination.zone and destination.zone~="" and (" • "..destination.zone) or ""))
                 if c.matches then
-                    local position=N.Adapter.Position();local distance=M.Distance(position,item)
-                    local where=distance and ("~"..M.Yards(distance)) or (position and item.map and position.map~=item.map and "Other continent" or "Distance unavailable")
-                    local restriction=item.mobile and " • Moving NPC" or item.phase and item.phase~=0 and " • Phase-dependent" or ""
-                    b.name:SetText(item.name);b.detail:SetText((item.role or item.category).." • "..(item.zone or "").."\n"..where..restriction)
+                    local distance=M.Distance(origin,item)
+                    b.distance:SetText(origin and item.map and origin.map~=item.map and "Other continent" or self:ListingDistance(distance,M.GroundSeconds(distance,c.ctx.speed,"bearing")))
                 else
-                    b.name:SetText(item.destination.name)
-                    b.detail:SetText(M.RouteLegs(item,c.ctx.speed))
+                    b.distance:SetText(self:ListingDistance(item.distance,item.eta));b.itinerary:SetText(M.RouteLegs(item,c.ctx.speed))
                 end
-                local nameHeight=self:WrappedHeight(b.name,21)
-                b.detail:ClearAllPoints();b.detail:SetPoint("TOPLEFT",10,-6-nameHeight-3)
-                local detailHeight=self:WrappedHeight(b.detail,20);local rowHeight=math.max(62,6+nameHeight+3+detailHeight+10)
+                b.name:ClearAllPoints();b.name:SetPoint("TOPLEFT",10,-4)
+                local y=4+self:WrappedHeight(b.name,16)+1
+                b.detail:ClearAllPoints();b.detail:SetPoint("TOPLEFT",10,-y);y=y+self:WrappedHeight(b.detail,15)+5
+                b.distance:ClearAllPoints();b.distance:SetPoint("TOPLEFT",10,-y);y=y+self:WrappedHeight(b.distance,14)
+                if not c.matches then b.itinerary:ClearAllPoints();b.itinerary:SetPoint("TOPLEFT",10,-y-4);y=y+4+self:WrappedHeight(b.itinerary,14) end
+                local rowHeight=y+5
                 b:SetHeight(rowHeight);b:ClearAllPoints();b:SetPoint("TOPLEFT",0,-bodyHeight);b.bodyOffset=bodyHeight
                 b.go:ClearAllPoints();b.go:SetPoint("RIGHT",b,"RIGHT",-8,0);bodyHeight=bodyHeight+rowHeight+6
-                b.normalColor=(c.matches and offset+i==c.highlight or not c.matches and i==c.selected) and {.22,.27,.18,1} or {.10,.11,.14,1};b.bg:SetVertexColor(unpack(b.normalColor))
+                b.normalColor=(c.matches and i==c.highlight or not c.matches and i==c.selected) and {.22,.27,.18,1} or {.10,.11,.14,1};b.bg:SetVertexColor(unpack(b.normalColor))
                 local tip
                 if c.matches then
-                    tip=item.name.."\n"..(item.source or "Flight point")
+                    tip=item.name.."\n"..(item.source or "Flight point").."\nDistance from "..(not c.searchOrigin and c.origin and c.origin.name or "current location")..". Ground ETA includes 35% for detours; bearings only."
                     if item.confidence=="provider" then tip=tip.."\nAvailability may depend on phase or quest progress." end
                     if item.faction then tip=tip.."\nFaction: "..item.faction end
                     if item.mobile then tip=tip.."\nThis NPC moves; the marker is a recorded location." end
@@ -363,6 +504,7 @@ function U:Refresh(c)
                 self:Tip(b,tip)
             end
         end
+        bodyHeight=math.max(0,bodyHeight-6)
         self.body:SetHeight(math.max(1,bodyHeight))
         local message=expanded and c.status or nil
         if not message and c.matches and #c.matches==0 then
@@ -377,11 +519,11 @@ function U:Refresh(c)
         self.note:SetText(message or "");self.note:SetShown(message~=nil)
         local messageHeight=message and (self:WrappedHeight(self.note,32)+10) or 0
         local hasFooter=self.go:IsShown() or self.stop:IsShown() or self.fold:IsShown()
-        local scale=math.min(c.profile.scale,UIParent:GetHeight()/660,UIParent:GetWidth()/(c.profile.width+16))
+        local scale=self.resizing and self.frame:GetScale() or math.min(c.profile.scale,UIParent:GetHeight()/660,UIParent:GetWidth()/(c.profile.width+16))
         local limit=(UIParent:GetHeight()-16)/scale-125-messageHeight-(hasFooter and 42 or 8)
-        local visible=math.max(0,math.min(bodyHeight,math.max(60,limit)))
+        local visible=math.max(0,math.min(self.resizing and c.profile.resultsHeight or bodyHeight,c.profile.resultsHeight,math.max(60,limit)))
         self.bodyScroll:SetHeight(math.max(1,visible));self.bodyScrollRange=math.max(0,bodyHeight-visible)
-        local key=c.matches or c.results;local selected=c.matches and (c.highlight or 1)-offset or (c.selected or 1)
+        local key=c.matches or c.results;local selected=c.matches and (c.highlight or 1) or (c.selected or 1)
         local scroll=self.scrollResults~=key and 0 or self.bodyScroll:GetVerticalScroll()
         if self.scrollResults~=key or self.scrollHighlight~=(c.matches and c.highlight or c.selected) then
             local row=self.rows[selected]
@@ -396,7 +538,7 @@ function U:Refresh(c)
         local footer=y+messageHeight
         self.go:ClearAllPoints();self.go:SetPoint("TOPLEFT",c.nav.route and 74 or 44,-footer);self.stop:ClearAllPoints();self.stop:SetPoint("TOPLEFT",c.profile.width-42,-footer)
         self.fold:ClearAllPoints();self.fold:SetPoint("TOPLEFT",14,-footer)
-        self.go.text:SetText("Find routes");self.frame:SetHeight(expanded and (footer+(hasFooter and 42 or 8)) or 129)
+        self.go.text:SetText("Find routes");if not self.resizing then self.frame:SetHeight(expanded and (footer+(hasFooter and 42 or 12)) or 129) end
     end
     self:Layout(c)
 end
@@ -410,6 +552,7 @@ function U:Guidance(c,p,ctx,now)
     self:PauseIcon(c)
     local east,north=M.Vector(p,target,ctx.facing)
     self.arrow:SetShown(not c.manualPause and east~=nil and c.nav.state~="flying" and c.nav.state~="paused" and c.nav.state~="unavailable" and c.nav.state~="arrived")
+    local cardinal=M.Cardinal(p,target);self.cardinal:SetText(cardinal or "");self.cardinal:SetShown(self.arrow:IsShown() and cardinal~=nil)
     if east then self.arrow:SetRotation(-math.atan2(east,north));if not ctx.facing and not c.manualPause and not c.nav.message and c.nav.state~="arrived" then self.directionNote:SetText("Bearing from north") end end
     if c.compact and self:LayoutGuidance(c) then self:Layout(c) end
 end

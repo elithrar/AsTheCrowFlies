@@ -5,6 +5,9 @@ function methods:ClearAllPoints() self.point=nil end
 function methods:SetSize(w,h) self.w=w;self.h=h end
 function methods:SetWidth(w) self.w=w end
 function methods:SetHeight(h) self.h=h end
+function methods:SetResizable(value) self.resizable=value end
+function methods:SetResizeBounds(a,b,c,d) assert(a>0 and b>0 and c>=a and d>=b,'native resize bounds must be positive and ordered');self.resizeBounds={a,b,c,d} end
+function methods:StartSizing(point) self.sizing=point end
 function methods:GetWidth() return self.w or 304 end
 function methods:GetHeight() return self.h or 28 end
 function methods:SetScript(event,fn) self.scripts[event]=fn end
@@ -18,9 +21,16 @@ function methods:IsShown() return self.shown~=false end
 function methods:SetText(v) self.text=v end
 function methods:SetTextColor(...) self.textColor={...} end
 function methods:GetText() return self.text or '' end
-function methods:SetFont(path,size) self.font=path;self.fontSize=size;return path~='missing' end
-function methods:GetFont() return self.font or 'native',self.fontSize or 12,'' end
-function methods:SetFontObject(v) self.fontObject=v;self.font=type(v)=='table' and v.GetFont and v:GetFont() or 'native' end
+function methods:SetFont(path,size,flags)
+    if path=='missing' then return false end
+    self.font=path;self.fontSize=size;self.fontFlags=flags or '';return true
+end
+function methods:GetFont() return self.font or 'native',self.fontSize or 12,self.fontFlags or '' end
+function methods:SetFontObject(v)
+    self.fontObject=v
+    if type(v)=='table' and v.GetFont then self.font,self.fontSize,self.fontFlags=v:GetFont()
+    else self.font='native';self.fontSize=12;self.fontFlags='' end
+end
 function methods:SetScale(v) self.scale=v end
 function methods:GetScale() return self.scale or 1 end
 function methods:GetEffectiveScale() return self:GetScale() end
@@ -85,7 +95,7 @@ function methods:CreateFontString() return object() end
 function CreateFont(name) return object(name) end
 function CreateFrame(kind,name,parent,template)
     local f=object(name);f.parent=parent;f.kind=kind;f.template=template
-    if kind=='DropdownButton' then f.Text=object() end;return f
+    if kind=='DropdownButton' or template=='UICheckButtonTemplate' then f.Text=object() end;return f
 end
 UIParent=object();UIParent:SetSize(1920,1080);Minimap=object();Minimap:SetSize(180,180)
 WorldMapFrame=object();local canvas=object();canvas:SetSize(1000,700)
@@ -147,7 +157,7 @@ end)
 test('whole destination flow input results go fold expand stop',function()
     C:Choose(C.destinations[1]);C:Plan();assert(#C.results==1);local width=U.frame:GetWidth();C:Go();assert(C.nav.route and C.compact and U.frame:GetWidth()==width)
     U.expand.scripts.OnClick();assert(not C.compact and U.frame:GetWidth()==width)
-    U.fold.scripts.OnClick();assert(C.compact);C:Tick();C:Stop();assert(not C.nav.route and not C.compact and not N.Overlay.mini:IsShown())
+    U.fold.scripts.OnClick();assert(C.compact);C:Tick();C:Stop();assert(not C.nav.route and not C.compact and N.Overlay.destination:IsShown(),'stopped navigation keeps the chosen destination preview')
 end)
 test('preview origin demands fresh current-location review',function()
     C:Choose(C.destinations[1]);C.origin=N.Model.Copy(C.destinations[1]);C.origin.x=1100;C:Plan();C:Go();assert(not C.nav.route and not C.origin and C.status:find('Recalculated'))
@@ -354,7 +364,7 @@ test('undiscovered route has dark red overlay and cannot start through any Go pa
     row.go.scripts.OnClick();assert(not C.nav.route and not C.compact)
     row.scripts.OnClick();assert(C.selected==2);C:Go();assert(not C.nav.route and C.status:find('Discover'))
     assert(not N.Navigation.Start(C.nav,C.results[2],A.Position(),now) and not C.nav.route)
-    C:Tick();assert(not N.Overlay.mini:IsShown());cleanup()
+    C:Tick();assert(not C.nav.route and not C.compact,'destination preview must never start a blocked route');cleanup()
 end)
 
 test('taxi observation unlocks an already displayed undiscovered route',function()
@@ -435,15 +445,15 @@ test('bounded trainer results retain width across compact state and reflow profi
     C.filter={categories={class=true},classes={MAGE=true},professions={}};C.results={route,route,route};C.matches=nil;C.nav.route=route;C.nav.leg=1;C.nav.state='walking';C.profile.scale=1.6
     C.nav.route=nil;C.compact=false;C.status=nil;C:Refresh()
     assert(not U.go:IsShown() and not U.stop:IsShown() and not U.fold:IsShown())
-    assert(U.frame:GetHeight()==125+U.body:GetHeight()+8,'results without footer controls retain only bottom padding')
+    assert(U.frame:GetHeight()==125+U.bodyScroll:GetHeight()+12,'results without footer controls retain grip padding')
     C.nav.route=route
     UIParent:SetSize(1280,720)
     for _,width in ipairs({280,320}) do
         C.profile.width=width;C.compact=false;C.status='A route status';C:Refresh()
         local physical=U.frame:GetWidth()*U.frame:GetScale()
-        assert(U.frame:GetHeight()*U.frame:GetScale()<=720 and U.rows[3].detail:GetHeight()>=20)
+        assert(U.frame:GetHeight()*U.frame:GetScale()<=720 and U.rows[3].detail:GetHeight()>=15)
         assert(U.header:GetWidth()<U.settings.point[2] and U.settings:GetFrameLevel()>U.header:GetFrameLevel())
-        assert(U.from:GetWidth()==width-102 and U.body:GetWidth()==width-28 and U.filterButton.point[2]==width-36)
+        assert(U.from:GetWidth()==width-104 and U.body:GetWidth()==width-28 and U.filterButton.point[2]==width-38)
         assert(U.fold:IsShown() and U.fold.point[2]+U.fold:GetWidth()<U.go.point[2])
         assert(U.rows[1].name:GetWidth()+10<=U.rows[1]:GetWidth()-8-U.rows[1].go:GetWidth())
         C.compact=true;C:Refresh();assert(U.frame:GetWidth()*U.frame:GetScale()==physical)
@@ -631,7 +641,7 @@ test('long names and flight descriptions grow and scroll without shrinking the i
     local route=N.Routes.Summary({{mode='walk',start=p,finish=goal,distance=500,quality='bearing'}},goal,C:Context())
     C.results={route,route,route};C.matches=nil;C.destination=goal;C.status=nil;C.compact=false;C:Refresh()
     local row=U.rows[1];assert(row.name:GetText()==goal.name and row.name:GetHeight()>40 and row.name.wordWrap and row.name.nonSpaceWrap)
-    assert(-row.detail.point[3]>=6+row.name:GetHeight() and row:GetHeight()>-row.detail.point[3]+row.detail:GetHeight())
+    assert(-row.detail.point[3]>=5+row.name:GetHeight() and row:GetHeight()>-row.detail.point[3]+row.detail:GetHeight())
     assert(U.bodyScrollRange>0 and U.frame:GetHeight()*U.frame:GetScale()<=720)
     U.body.scripts.OnMouseWheel(nil,-1);assert(U.bodyScroll:GetVerticalScroll()>0)
     local physical=U.frame:GetWidth()*U.frame:GetScale();C.nav.route=route;C.nav.leg=1;C.nav.state='walking';C.compact=true;C:Refresh()
@@ -676,5 +686,289 @@ test('late media registration refits options and custom text color leaves native
     assert(O.font.Text:GetScale()<.5 and O.font.Text.font=='late-wide.ttf')
     assert(U.eagle.color[1]==.88 and U.eagle.color[2]==.66 and U.settings.iconKind=='cog')
     O.font.Text.GetUnboundedStringWidth=width;LibStub=original;C.profile.colors.text=color;C:ApplyProfile()
+end)
+-- Exercise the native failure modes that a successful font probe alone cannot
+-- establish: a later control can reject a path or retain its previous face.
+local function assertOwnedFamily(path)
+    for _,entry in ipairs(U.texts) do
+        local actual=entry[1]:GetFont()
+        assert(actual==path,'mixed font family: '..tostring(actual)..' instead of '..path)
+    end
+end
+local function withFontLibrary(run)
+    local previous,preference,watched=LibStub,C.profile.font,U.fontLibrary
+    local callbacks={};local lib={IsValid=function(_,kind,name) return kind=='font' and name=='Expressway' end,
+        Fetch=function() return 'review-expressway.ttf' end,List=function() return {'Expressway'} end,
+        RegisterCallback=function(_,event,fn) callbacks[event]=fn end}
+    LibStub=function() return lib end;C.profile.font='Expressway';C:ApplyProfile()
+    run(lib,callbacks)
+    LibStub=previous;C.profile.font=preference;U.fontLibrary=watched;C:ApplyProfile()
+end
+
+test('one rejected option font downgrades every earlier and later object then recovers',function()
+    withFontLibrary(function()
+        local target=N.Options.overlays.text;local original=target.SetFont
+        for _,silent in ipairs({false,true}) do
+            target.SetFont=function(self,path,size,flags)
+                if path=='review-expressway.ttf' then return silent end
+                return original(self,path,size,flags)
+            end
+            target.font='previous-face.ttf';C:RefreshAppearance(true)
+            assertOwnedFamily(STANDARD_TEXT_FONT)
+            assert(C.profile.font=='Expressway','fallback must preserve the saved preference')
+            target.SetFont=original;C:RefreshAppearance(true);assertOwnedFamily('review-expressway.ttf')
+        end
+        target.SetFont=nil
+    end)
+end)
+
+test('failed selected and default paths converge on inherited native font without aborting options',function()
+    withFontLibrary(function()
+        local target=N.Options.fontSize;target.SetFont=function() return false end
+        target.font='previous-face.ttf';C:RefreshAppearance(true)
+        assertOwnedFamily('native')
+        for _,entry in ipairs(U.texts) do assert(entry[1].fontObject==GameFontNormal) end
+        assert(C.profile.font=='Expressway' and N.Options.fontSize:GetText()==tostring(C.profile.fontSize))
+        target.SetFont=nil;C:RefreshAppearance(true);assertOwnedFamily('review-expressway.ttf')
+    end)
+end)
+
+test('registered but missing font falls back consistently and retries on media change',function()
+    withFontLibrary(function(lib,callbacks)
+        local path='missing';lib.Fetch=function() return path end;U:WatchFonts()
+        assertOwnedFamily(STANDARD_TEXT_FONT);assert(C.profile.font=='Expressway')
+        path='repaired-media.ttf';callbacks.LibSharedMedia_SetGlobal(nil,'font')
+        assertOwnedFamily('repaired-media.ttf');assert(C.profile.font=='Expressway')
+    end)
+end)
+
+test('fractional native font heights remain cached across unchanged options and appearance refreshes',function()
+    local original=methods.SetFont;local writes=0
+    methods.SetFont=function(self,path,size,flags)
+        writes=writes+1;local ok=original(self,path,size,flags)
+        if ok then self.fontSize=size+.000001 end
+        return ok
+    end
+    withFontLibrary(function()
+        assertOwnedFamily('review-expressway.ttf');local before=writes;local generated={}
+        for _,d in ipairs(U.dropdowns) do generated[d]=d.generated end
+        C:RefreshAppearance(false);N.Options:Refresh();U:RefreshFonts()
+        assert(writes==before,'native uiUnit roundoff must not trigger font rewrites or reprobes')
+        for _,d in ipairs(U.dropdowns) do assert(d.generated==generated[d],'unchanged options must not rebuild native menus') end
+    end)
+    methods.SetFont=original;C:RefreshAppearance(true)
+end)
+
+test('opening options repairs native dropdown checkbox and edit font resets using readback',function()
+    withFontLibrary(function()
+        local O=N.Options;O.frame:Hide()
+        assert(O.overlays.Text==O.overlays.text,'exercise the native checkbox label')
+        local reset={O.font.Text,O.order.Text,O.overlays.Text,O.fontSize,U.menuFont}
+        for _,t in ipairs(reset) do t:SetFont('native-widget-reset.ttf',10,'OUTLINE') end
+        O:Open();assert(O.frame:IsShown());assertOwnedFamily('review-expressway.ttf')
+        assert(O.font.Text.fontSize==12 and O.fontSize.fontSize==12 and O.overlays.Text.fontSize==12)
+        O.frame:Hide()
+    end)
+end)
+
+test('first late SharedMedia library attachment refreshes and refits the complete options dialog',function()
+    local O=N.Options;local previous,preference,watched=LibStub,C.profile.font,U.fontLibrary
+    local measure=O.font.Text.GetUnboundedStringWidth;local callbacks={}
+    O.font.Text.GetUnboundedStringWidth=function(self) return self.font=='late-first.ttf' and 700 or 70 end
+    LibStub=nil;U.fontLibrary=nil;C.profile.font='Expressway';C:ApplyProfile()
+    assertOwnedFamily(STANDARD_TEXT_FONT);assert(O.font.Text:GetScale()==1)
+    local lib={IsValid=function() return true end,Fetch=function() return 'late-first.ttf' end,List=function() return {'Expressway'} end,
+        RegisterCallback=function(_,event,fn) callbacks[event]=fn end}
+    -- All registrations happened before this addon's ADDON_LOADED event; no
+    -- registration callback will rescue a font-only attachment refresh.
+    LibStub=function() return lib end;C.events.scripts.OnEvent(nil,'ADDON_LOADED','LateMediaProvider')
+    assert(callbacks.LibSharedMedia_Registered and callbacks.LibSharedMedia_SetGlobal)
+    assertOwnedFamily('late-first.ttf');assert(O.font.Text:GetScale()<.4)
+    O.font.Text.GetUnboundedStringWidth=measure;LibStub=previous;C.profile.font=preference;U.fontLibrary=watched;C:ApplyProfile()
+end)
+
+test('native selected dropdown labels follow the new profile before generation',function()
+    C:Stop();local O=N.Options;local profile,profiles=C.profile,C.profiles
+    local controls={O.font,O.order,O.placement,O.active};local popupFonts={}
+    for _,d in ipairs(controls) do
+        -- Blizzard keeps generated selection text separately from its fallback.
+        -- SetDefaultText alone does not replace a previously selected label.
+        d.SetDefaultText=function(self,value)
+            self.defaultText=value;self.label=self.selectionText or value;self.Text:SetText(self.label)
+        end
+        d.GenerateMenu=function(self)
+            self.generated=(self.generated or 0)+1;local selections={}
+            local root={SetScrollMode=function() end,CreateRadio=function(_,label,selected)
+                if selected() then selections[#selections+1]=label end
+                return {AddInitializer=function(_,initialize)
+                    local text=setmetatable({SetFontObject=function(_,font) popupFonts[#popupFonts+1]=font end},
+                        {__index=function(_,key) if key=='SetFont' then error('compositor-owned font cannot be assigned directly') end end})
+                    initialize({fontString=text})
+                end}
+            end}
+            self.menu(self,root);self.selectionText=selections[1];self.label=self.selectionText or self.defaultText;self.Text:SetText(self.label)
+        end
+        d.atcfSelectionValue=nil
+    end
+    C.profile=N.Model.Copy(profile);C.profile.font='Expressway';C.profile.routeOrder='distance';C.profile.dock='none'
+    C.profiles={version=1,active='Before',profiles={Before=C.profile,After=N.Model.Copy(C.profile)}}
+    local after=C.profiles.profiles.After;after.font='Arial';after.routeOrder='time';after.dock='right'
+    C:BindFilters();C:ApplyProfile();assert(O.font.Text:GetText()=='Expressway' and O.order.Text:GetText()=='Distance')
+    assert(O:ProfileAction('SwitchProfile','After'))
+    assert(O.font.Text:GetText()=='Arial' and O.order.Text:GetText()=='Estimated time')
+    assert(O.placement.Text:GetText()=='Right screen edge' and O.active.Text:GetText()=='After')
+    assert(#popupFonts>0);for _,font in ipairs(popupFonts) do assert(font==U.menuFont) end
+    for _,d in ipairs(controls) do d.SetDefaultText=nil;d.GenerateMenu=nil;d.selectionText=nil;d.atcfSelectionValue=nil end
+    C.profile=profile;C.profiles=profiles;C:BindFilters();C:ApplyProfile()
+end)
+
+test('structured compact matches show more rows and scroll all results without changing selection',function()
+    C:Stop();C.origin=nil;C.status=nil;C.destination=nil;C.searchOrigin=false;C.profile.fontSize=13;C:ApplyProfile()
+    local p=A.Position();C.matches={};C.highlight=1
+    for i=1,40 do local goal=N.Model.Copy(p);goal.name='Trainer '..i;goal.role='Warrior Trainer';goal.zone='Ironforge';goal.category='class';goal.x=p.x+1700+i;C.matches[i]=goal end
+    C:Refresh();local row=U.rows[1]
+    assert(row.name:GetText()=='Trainer 1' and row.name.textColor[1]==1 and row.name.textColor[2]==.82 and row.name.fontFlags=='OUTLINE')
+    assert(row.detail:GetText()=='Warrior Trainer • Ironforge' and row.detail.fontSize==12 and row.detail.fontFlags=='OUTLINE')
+    assert(row.distance:GetText():match('^Distance: ~1.7k yards %(est%. %d+ minutes%)$'))
+    assert(-row.distance.point[3]==-row.detail.point[3]+row.detail:GetHeight()+5 and row:GetHeight()<77)
+    assert(U.rows[4].bodyOffset+U.rows[4]:GetHeight()<=U.bodyScroll:GetHeight() and U.rows[40]:IsShown())
+    C.highlight=40;C:Refresh();assert(U.bodyScroll:GetVerticalScroll()>0)
+    local highlight=C.highlight;U.body.scripts.OnMouseWheel(nil,-1000);assert(C.highlight==highlight)
+    assert(U.bodyScroll:GetVerticalScroll()==U.bodyScrollRange)
+    U.rows[40].scripts.OnClick();assert(C.destination.name=='Trainer 40');C:Stop();C.destination=nil
+end)
+
+test('result distance uses preview origin and flight route ETA retains the planned transport cost',function()
+    C:Stop();local saved=C.destinations;local p=A.Position();local near=N.Model.Copy(p);near.x=p.x+1700;near.name='Near preview';near.id='near';near.category='place'
+    local far=N.Model.Copy(p);far.x=p.x+10;far.name='Near player';far.id='far';far.category='place'
+    C.destinations={near,far};C.origin=N.Model.Copy(near);C.origin.x=near.x-50;C.origin.name='Preview';C:Search('',false);flushSearch()
+    assert(C.matches[1]==near and U.rows[1].distance:GetText()=='Distance: ~50 yards (est. <1 minute)')
+    C:Search('',true);flushSearch();assert(C.matches[1]==far and U.rows[1].distance:GetText()=='Distance: ~10 yards (est. <1 minute)')
+    C.matches=nil;C.origin=nil;local route=N.Routes.Summary({{mode='flight',from=1,to=2,start=p,finish=near,distance=1700,seconds=70}},near,C:Context())
+    route.eta=70;C.results={route};C:Refresh();assert(U.rows[1].distance:GetText()=='Distance: ~1.7k yards (est. 1 minute)' and U.rows[1].itinerary:IsShown())
+    assert(U:ListingDistance(nil,nil)=='Distance unavailable' and U:ListingDistance(0,0)=='Distance: ~0 yards (est. <1 minute)')
+    C:Stop();C.destinations=saved
+end)
+
+test('native resize persists bounded results geometry and ends on release lock or hide',function()
+    C:Stop();C:ShowPanel(true);local saved=N.Model.Copy(C.profile);local p=A.Position();p.name='Resize target';p.role='Trainer';p.zone='Ironforge';C.matches={}
+    for i=1,40 do C.matches[i]=p end;C.highlight=1;C.profile.locked=false;C:Refresh()
+    assert(U.resizeGrip:IsShown() and U.frame.resizable and U.frame.resizeBounds[1]==280)
+    local anchor=U.frame.point;U.resizeGrip.scripts.OnMouseDown(nil,'RightButton');assert(not U.resizing)
+    U.resizeGrip.scripts.OnMouseDown(nil,'LeftButton');assert(U.resizing and U.frame.sizing=='BOTTOMRIGHT' and C.profile.dock=='none')
+    local height=U.resizeChrome+410;U.frame:SetSize(460,height);U.frame.scripts.OnSizeChanged(U.frame,460,height)
+    assert(C.profile.width==460 and C.profile.resultsHeight==410 and U.bodyScroll:GetHeight()==410)
+    C:Refresh();assert(U.frame.point==anchor and U.frame:GetWidth()==460 and U.frame:GetHeight()==height,'refresh leaves native sizing geometry alone')
+    U.resizeGrip.scripts.OnMouseUp(nil,'LeftButton');assert(not U.resizing and U.frame:GetWidth()==460)
+    local loaded=N.Settings.Load(C.profile);assert(loaded.width==460 and loaded.resultsHeight==410)
+    U.resizeGrip.scripts.OnMouseDown(nil,'LeftButton');C.profile.locked=true;C:Refresh();assert(not U.resizing and not U.resizeGrip:IsShown())
+    U.resizeGrip.scripts.OnMouseDown(nil,'LeftButton');assert(not U.resizing)
+    C.profile.locked=false;C:Refresh();U.resizeGrip.scripts.OnMouseDown(nil,'LeftButton');C:ShowPanel(false);assert(not U.resizing)
+    for k,v in pairs(saved) do C.profile[k]=v end;C:ShowPanel(true);C:Stop();C:ApplyProfile()
+end)
+
+test('header movement survives background refresh and saves release position without snapping back',function()
+    C:Stop();C:ShowPanel(true);local saved=N.Model.Copy(C.profile);local left,top=U.frame.GetLeft,U.frame.GetTop
+    C.profile.locked=false;C.profile.dock='none';C:Refresh();U.header.scripts.OnDragStart();assert(U.dragging)
+    U.frame:SetPoint('TOPLEFT',UIParent,'TOPLEFT',420,-240);local anchor=U.frame.point
+    U.frame.GetLeft=function() return 420 end;U.frame.GetTop=function() return UIParent:GetHeight()/U.frame:GetScale()-240 end
+    C:RefreshAppearance(false);C:Refresh();assert(U.dragging and U.frame.point==anchor,'refresh must not restore saved anchors while native move owns them')
+    U.header.scripts.OnDragStop();assert(not U.dragging and C.profile.x==420 and C.profile.y==-240 and C.profile.dock=='none' and not C.tucked)
+    C:Refresh();assert(U.frame.point[4]==420 and U.frame.point[5]==-240)
+    U.frame.GetLeft=left;U.frame.GetTop=top;for k,v in pairs(saved) do C.profile[k]=v end;C:ApplyProfile()
+end)
+
+test('navigation typography grows ten percent and compass stays world relative as arrow turns',function()
+    C:Stop();local p=A.Position();local goal=N.Model.Copy(p);goal.x=p.x+1000;goal.y=p.y+1000;goal.name='Southwind trainer';goal.id='compass'
+    local route=N.Routes.Summary({{mode='walk',start=p,finish=goal,distance=N.Model.Distance(p,goal),quality='bearing'}},goal,C:Context())
+    C.results={route};C.selected=1;C.origin=nil;C.matches=nil;C.destination=goal;C:Go();C.manualPause=false
+    U:Guidance(C,p,{speed=7,facing=0},0);local rotation=U.arrow.rotation
+    assert(U.cardinal:GetText()=='NW' and U.cardinal:IsShown() and U.next.textColor[1]==1 and U.next.fontFlags=='OUTLINE')
+    assert(math.abs(U.next.fontSize-C.profile.fontSize*1.1)<.0001)
+    U:Guidance(C,p,{speed=7,facing=math.pi/2},0);assert(U.cardinal:GetText()=='NW' and U.arrow.rotation~=rotation)
+    assert(U.tuck.iconKind=='back');U:SetDock(C,'right',true);assert(U.handle.iconKind=='left');U.handle.scripts.OnClick()
+    U.pause.scripts.OnClick();assert(not U.cardinal:IsShown());C:Stop();C.profile.dock='none';C:Refresh()
+end)
+test('matching bold weight is validated cached and downgraded without losing the regular family',function()
+    withFontLibrary(function(lib)
+        lib.IsValid=function(_,kind,name) return name=='Expressway' or name=='Expressway Bold' end
+        lib.Fetch=function(_,kind,name) return name=='Expressway Bold' and 'expressway-bold.ttf' or 'review-expressway.ttf' end
+        C:RefreshAppearance(true)
+        assert(U.next.font=='expressway-bold.ttf' and U.next.fontFlags=='' and U.rows[1].detail.font=='expressway-bold.ttf')
+        assert(N.Options.font.Text.font=='review-expressway.ttf' and U.remaining.font=='review-expressway.ttf')
+        local target=U.rows[3].name;local original=target.SetFont or methods.SetFont
+        target.SetFont=function(self,path,size,flags) if path=='expressway-bold.ttf' then return true end;return original(self,path,size,flags) end
+        target.font='previous-font';C:RefreshAppearance(true)
+        assert(U.next.font=='review-expressway.ttf' and U.next.fontFlags=='OUTLINE' and U.rows[1].detail.font=='review-expressway.ttf')
+        assert(N.Options.font.Text.font=='review-expressway.ttf' and C.profile.font=='Expressway')
+        target.SetFont=nil;C:RefreshAppearance(true);assert(U.next.font=='expressway-bold.ttf')
+    end)
+end)
+
+test('editor labels fields action buttons and route action share consistent alignment at supported widths',function()
+    C:Stop();local savedWidth=C.profile.width;C.destination=nil;C.status=nil;C.matches={}
+    for _,width in ipairs({280,304,460,640}) do
+        C.profile.width=width;C:Refresh()
+        assert(U.current.point[2]==U.filterButton.point[2] and U.current:GetWidth()==U.filterButton:GetWidth())
+        assert(U.current.point[2]+U.current:GetWidth()==width-14 and U.tuck.point[2]==U.current.point[2])
+        assert(U.from:GetWidth()==U.to:GetWidth() and U.from.point[2]+U.from:GetWidth()+4==U.current.point[2])
+        assert(U.current.point[3]-U.current:GetHeight()/2==U.from.point[3]-U.from:GetHeight()/2)
+        assert(U.filterButton.point[3]-U.filterButton:GetHeight()/2==U.to.point[3]-U.to:GetHeight()/2)
+        assert(U.fieldLabels[1].point[3]-U.fieldLabels[1]:GetHeight()/2==U.from.point[3]-U.from:GetHeight()/2)
+        assert(U.go.point[2]+U.go:GetWidth()/2==width/2 and U.go.text.justifyH=='CENTER')
+    end
+    C.profile.width=savedWidth;C:Stop();C:Refresh()
+end)
+test('map and minimap preferences default on migrate explicit opt outs and remain independent',function()
+    local S=N.Settings
+    local p=S.Load({});assert(p.mapMarkers and p.minimapMarkers)
+    p=S.Load({overlays=false});assert(not p.mapMarkers and not p.minimapMarkers)
+    p=S.Load({overlays=false,mapMarkers=true});assert(p.mapMarkers and not p.minimapMarkers)
+    p=S.Load({mapMarkers=false,minimapMarkers=true});assert(not p.mapMarkers and p.minimapMarkers)
+    local savedMap,savedMini=C.profile.mapMarkers,C.profile.minimapMarkers
+    N.Options.overlays:SetChecked(false);N.Options.overlays.scripts.OnClick();assert(not C.profile.mapMarkers and C.profile.minimapMarkers)
+    N.Options.minimapMarkers:SetChecked(false);N.Options.minimapMarkers.scripts.OnClick();assert(not C.profile.mapMarkers and not C.profile.minimapMarkers)
+    C.profile.mapMarkers=savedMap;C.profile.minimapMarkers=savedMini;C:ApplyProfile()
+end)
+
+test('selected destination appears before Go on zone and world maps with independent minimap control',function()
+    C:Stop();C.destination=nil;C.origin=nil;C.manualPause=false;C.results={}
+    local mapID,shown=WorldMapFrame.GetMapID,WorldMapFrame:IsShown();local project=C_Map.GetMapPosFromWorldPos
+    local oldMap,oldMini=C.profile.mapMarkers,C.profile.minimapMarkers;C.profile.mapMarkers=true;C.profile.minimapMarkers=true
+    local id=1429;WorldMapFrame.GetMapID=function() return id end;WorldMapFrame:Show()
+    local p=A.Position();local goal=N.Model.Copy(p);goal.name='Map preview';goal.id='map-preview';goal.x=p.x+20
+    C:Choose(goal);local O=N.Overlay;O:Update(C,p,{facing=0,speed=7})
+    assert(not C.nav.route and O.destination:IsShown() and O.destination.caption=='Destination: Map preview' and O.mini:IsShown())
+    id=947;O:Update(C,p,{facing=0,speed=7});assert(O.destination:IsShown(),'use native projection for the currently viewed map')
+    C.profile.minimapMarkers=false;O:Update(C,p,{speed=7});assert(not O.mini:IsShown() and O.destination:IsShown())
+    C.profile.minimapMarkers=true;C.profile.mapMarkers=false;O:Update(C,p,{speed=7});assert(O.mini:IsShown() and not O.destination:IsShown())
+    C.profile.mapMarkers=true;O:Update(C,nil,{speed=7});assert(O.destination:IsShown() and not O.mini:IsShown(),'map coordinates remain useful while player location is missing')
+    O:Update(C,p,{dead=true,speed=7});assert(O.destination:IsShown() and not O.mini:IsShown())
+    C_Map.GetMapPosFromWorldPos=function() return 999,CreateVector2D(.5,.5) end
+    O:Update(C,p,{speed=7});assert(not O.destination:IsShown(),'never place a fabricated pin on an unsupported map')
+    C_Map.GetMapPosFromWorldPos=project;WorldMapFrame.GetMapID=mapID;WorldMapFrame:SetShown(shown)
+    C.profile.mapMarkers=oldMap;C.profile.minimapMarkers=oldMini;C.destination=nil;C:Stop()
+end)
+
+test('active navigation owns minimap direction while a new destination is previewed on the world map',function()
+    C:Stop();C.origin=nil;C.manualPause=false;local p=A.Position();local active=N.Model.Copy(p);active.name='Active';active.id='active-marker';active.x=p.x+30
+    local route=N.Routes.Summary({{mode='walk',start=p,finish=active,distance=30,quality='bearing'}},active,C:Context())
+    C.results={route};C.destination=active;C.selected=1;C:Go();local O=N.Overlay
+    local preview=N.Model.Copy(p);preview.y=p.y+30;preview.name='Preview';C:Choose(preview);O:Update(C,p,{facing=0,speed=7})
+    assert(O.destination.caption=='Destination: Preview' and O.icon.rotation==0 and C.nav.route==route)
+    C.manualPause=true;O:Update(C,p,{facing=0,speed=7});assert(O.destination:IsShown() and not O.mini:IsShown() and (not O.map or not O.map:IsShown()))
+    C.manualPause=false;C.destination=nil;C:Stop()
+end)
+test('retained marker updates preserve hover visibility and missing canvas clears stale pins',function()
+    C:Stop();C.origin=nil;C.manualPause=false;local p=A.Position();local goal=N.Model.Copy(p);goal.name='Stable marker';goal.x=p.x+20;C:Choose(goal)
+    local O=N.Overlay;O:Update(C,p,{facing=0,speed=7});assert(O.destination:IsShown() and O.mini:IsShown())
+    local hides=0;local tracked={O.destination,O.mini}
+    for _,f in ipairs(tracked) do f.Hide=function(self) hides=hides+1;methods.Hide(self) end end
+    local allocated=#frames;for _=1,10 do O:Update(C,p,{facing=0,speed=7}) end
+    assert(hides==0 and #frames==allocated,'ordinary ticks retain pin visibility and pooled frames')
+    local canvasFn=WorldMapFrame.GetCanvas;WorldMapFrame.GetCanvas=function() return nil end
+    O:Update(C,p,{facing=0,speed=7});assert(not O.destination:IsShown() and O.mini:IsShown())
+    WorldMapFrame.GetCanvas=canvasFn;C.destination=nil;C:Stop();assert(not O.destination:IsShown() and not O.mini:IsShown())
+    for _,f in ipairs(tracked) do f.Hide=nil end
 end)
 print('PASS runtime scenarios: '..count..'; frames allocated='..#frames)

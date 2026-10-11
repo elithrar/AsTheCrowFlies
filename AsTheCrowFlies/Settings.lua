@@ -1,5 +1,5 @@
 local _,N=...; local M=N.Model; local S={}; N.Settings=S
-S.defaults={version=1,width=304,scale=1,font="Expressway",fontSize=13,locked=false,dock="none",x=24,y=-180,overlays=true,flightPrior=32,routeOrder="distance",
+S.defaults={version=1,width=304,resultsHeight=296,scale=1,font="Expressway",fontSize=13,locked=false,dock="none",x=24,y=-180,mapMarkers=true,minimapMarkers=true,flightPrior=32,routeOrder="distance",
     colors={background={.045,.048,.062},accent={.78,.85,.61},text={.93,.94,.97}},searchFilters={categories={},classes={},professions={}}}
 function S.Filters(saved)
     saved=type(saved)=="table" and saved or {};local clean={categories={},classes={},professions={}}
@@ -18,8 +18,13 @@ function S.Load(saved,build)
     if type(saved.version)=="number" and saved.version>1 then return M.Copy(S.defaults),true end
     local p=M.Copy(S.defaults)
     for k,d in pairs(p) do if type(d)~="table" and type(saved[k])==type(d) then p[k]=saved[k] end end
-    for _,k in ipairs({"width","scale","fontSize","x","y","flightPrior"}) do if not M.Number(p[k]) then p[k]=S.defaults[k] end end
-    p.width=math.max(280,math.min(320,p.width)); p.scale=math.max(.5,math.min(1.6,p.scale))
+    -- Split the former shared toggle without re-enabling markers a user hid.
+    -- Explicit new preferences take precedence when loading mixed-version data.
+    for _,key in ipairs({"mapMarkers","minimapMarkers"}) do
+        if type(saved[key])~="boolean" and saved.overlays==false then p[key]=false end
+    end
+    for _,k in ipairs({"width","resultsHeight","scale","fontSize","x","y","flightPrior"}) do if not M.Number(p[k]) then p[k]=S.defaults[k] end end
+    p.width=math.max(280,math.min(640,p.width));p.resultsHeight=math.max(100,math.min(560,p.resultsHeight)); p.scale=math.max(.5,math.min(1.6,p.scale))
     p.fontSize=math.floor(math.max(10,math.min(18,p.fontSize)))
     p.flightPrior=math.max(10,math.min(60,p.flightPrior))
     p.x=math.max(-20000,math.min(20000,p.x));p.y=math.max(-20000,math.min(20000,p.y))

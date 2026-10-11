@@ -1,6 +1,6 @@
 """Original procedural UI masks; no copied XPIsland media or font files."""
 from pathlib import Path
-import sys
+import sys,math
 ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT/'.work/pydeps'))
 from PIL import Image,ImageDraw
 target=ROOT/'AsTheCrowFlies/Media';target.mkdir(exist_ok=True)
@@ -32,4 +32,15 @@ def crow(d):
     d.line([(176,191),(166,201)],fill='white',width=7)
     d.ellipse((187,58,194,65),fill=(255,255,255,0))
 save('eagle',crow)
-print('Generated three original RGBA masks')
+def cog(d):
+    # Solid eight-tooth gear with a clear hub; no thin overlapping line joins.
+    points=[]
+    for tooth in range(8):
+        center=tooth*math.pi/4
+        for degrees,radius in [(-22.5,78),(-13,78),(-10,104),(10,104),(13,78)]:
+            angle=center+math.radians(degrees)
+            points.append((128+math.cos(angle)*radius,128+math.sin(angle)*radius))
+    d.polygon(points,fill='white')
+    d.ellipse((93,93,163,163),fill=(255,255,255,0))
+save('cog',cog)
+print('Generated four original RGBA masks')

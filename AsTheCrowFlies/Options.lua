@@ -96,8 +96,10 @@ function O:Create(c)
     self.order=self:Dropdown(page,328,-125,260,"Distance",function() return {{label="Distance",value="distance"},{label="Estimated time",value="time"}} end,function(value)
         c.profile.routeOrder=value;if #c.results>0 then c:Plan() end;c:ApplyProfile()
     end)
-    self.overlays=self:Check(page,"Map markers","overlays",328,-166)
-    self.locked=self:Check(page,"Lock position","locked",328,-196)
+    self.overlays=self:Check(page,"World / zone map markers","mapMarkers",328,-166)
+    self.mapMarkers=self.overlays
+    self.minimapMarkers=self:Check(page,"Minimap markers","minimapMarkers",328,-194)
+    self.locked=self:Check(page,"Lock position","locked",328,-222)
     self.placement=self:Dropdown(page,328,-296,260,"Free (dragged)",function() return {
         {label="Free (dragged)",value="none"},{label="Left screen edge",value="left"},{label="Right screen edge",value="right"}
     } end,function(value) U:SetDock(c,value,true);c:ApplyProfile() end)
@@ -127,6 +129,12 @@ function O:Create(c)
     self.cancel=self:Button(profiles,"Cancel",328,-366,260,function() self.confirm=nil;self:Refresh() end)
     self.status=self:Label(content,"",20,-442,580,11,{.8,.8,.8})
     f:SetScript("OnHide",function() self:CloseColor();self.confirm=nil;self.name:ClearFocus();self.fontSize:ClearFocus();self.scaleEdit:ClearFocus();for _,d in ipairs(U.dropdowns or {}) do d:CloseMenu() end end)
+    f:SetScript("OnShow",function()
+        self:Refresh()
+        -- Child templates can apply inherited fonts after the parent OnShow.
+        if self.fontRepairQueued then return end;self.fontRepairQueued=true
+        C_Timer.After(0,function() self.fontRepairQueued=false;if f:IsShown() then self:Refresh() end end)
+    end)
     f:RegisterEvent("UI_SCALE_CHANGED");f:RegisterEvent("DISPLAY_SIZE_CHANGED");f:SetScript("OnEvent",function() self:Layout() end)
     UISpecialFrames=UISpecialFrames or {};table.insert(UISpecialFrames,"AsTheCrowFliesOptions");self:Page(false);f:Hide()
 end
@@ -171,17 +179,19 @@ function O:Color(key)
         cancelFunc=function() if not owns() then return end;profile.colors[key]=original;self.colorEdit=nil;if c.profile==profile then c:ApplyProfile() end end})
     edit.opening=false
 end
-function O:Refresh()
+function O:Refresh(fontsReady)
     if not self.frame then return end
+    if not fontsReady then self.owner:RefreshAppearance(false);return end
     local c=self.owner;local p=c.profile;self.refreshing=true;self.font.value=p.font;self.font:SetDefaultText(p.font)
     self.fontSize:SetText(tostring(p.fontSize));self.scale:SetValue(p.scale*100);self.scaleEdit:SetText(tostring(math.floor(p.scale*100+.5)))
     self.placement.value=p.dock;self.placement:SetDefaultText(p.dock=="right" and "Right screen edge" or p.dock=="left" and "Left screen edge" or "Free (dragged)")
     self.optionsTab.activeLine:SetShown(not self.profilesSelected);self.profilesTab.activeLine:SetShown(self.profilesSelected==true)
     self.optionsTab.text:SetTextColor(unpack(not self.profilesSelected and {.93,.94,.97} or gold));self.profilesTab.text:SetTextColor(unpack(self.profilesSelected and {.93,.94,.97} or gold))
     self.order.value=p.routeOrder;self.order:SetDefaultText(p.routeOrder=="time" and "Estimated time" or "Distance")
-    self.overlays:SetChecked(p.overlays);self.locked:SetChecked(p.locked);self.active.value=c.profiles.active;self.active:SetDefaultText(c.profiles.active)
+    self.overlays:SetChecked(p.mapMarkers);self.minimapMarkers:SetChecked(p.minimapMarkers);self.locked:SetChecked(p.locked);self.active.value=c.profiles.active;self.active:SetDefaultText(c.profiles.active)
     self.copy.text:SetText(self.confirm=="copy" and "Confirm copy" or "Copy settings");self.reset.text:SetText(self.confirm=="reset" and "Confirm reset" or "Reset active profile");self.cancel:SetShown(self.confirm~=nil)
     for key,button in pairs(self.colors) do button.swatch:SetColorTexture(unpack(p.colors[key])) end
+    N.UI:SyncMenus()
     self:Layout();self.refreshing=false
 end
 function O:Page(profiles)

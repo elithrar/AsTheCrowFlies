@@ -16,5 +16,5 @@ class Packages(unittest.TestCase):
                 taxi=z.read('AsTheCrowFlies/Data/Taxi.lua')
                 self.assertEqual(b'N.Data.LocalTaxi=' in taxi,local)
                 self.assertIn('AsTheCrowFlies/docs/COVERAGE.md',names)
-                for media in ('eagle','arrow','surface'):self.assertIn(f'AsTheCrowFlies/Media/{media}.tga',names)
+                for media in ('eagle','arrow','surface','cog'):self.assertIn(f'AsTheCrowFlies/Media/{media}.tga',names)
 if __name__=='__main__':unittest.main(argv=[sys.argv[0]])
