@@ -2,6 +2,7 @@ local _,N=...;local O={};N.Options=O
 -- Match the installed XPIsland dialog's native controls, sizing and chrome.
 local backdrop={bgFile="Interface\\Buttons\\WHITE8X8",edgeFile="Interface\\Tooltips\\UI-Tooltip-Border",tile=true,tileSize=8,edgeSize=10,insets={left=2,right=2,top=2,bottom=2}}
 local gold={1,.82,.2}
+local dialogWidth,dialogHeight=620,500
 function O:Label(parent,text,x,y,width,size,color)
     local t=parent:CreateFontString(nil,"OVERLAY");t.atcfFixedFont=true;t.atcfOptions=true;N.UI:Font(t,size or 12)
     t:SetPoint("TOPLEFT",x,y);t:SetSize(width or 260,(size or 12)+6);t:SetJustifyH("LEFT");t:SetJustifyV("MIDDLE");t:SetWordWrap(false)
@@ -42,7 +43,7 @@ end
 function O:Create(c)
     self.owner=c;self.bounded={};local U=N.UI
     local f=CreateFrame("Frame","AsTheCrowFliesOptions",UIParent,"BackdropTemplate");self.frame=f
-    f:SetSize(620,462);f:SetPoint("CENTER");f:SetFrameStrata("DIALOG");f:SetClampedToScreen(true);f:EnableMouse(true);f:SetMovable(true);f:RegisterForDrag("LeftButton")
+    f:SetSize(dialogWidth,dialogHeight);f:SetPoint("CENTER");f:SetFrameStrata("DIALOG");f:SetClampedToScreen(true);f:EnableMouse(true);f:SetMovable(true);f:RegisterForDrag("LeftButton")
     f:SetBackdrop({bgFile="Interface\\Buttons\\WHITE8X8",edgeFile="Interface\\DialogFrame\\UI-DialogBox-Border",tile=true,tileSize=8,edgeSize=16,insets={left=4,right=4,top=4,bottom=4}})
     f:SetBackdropColor(.045,.045,.05,.94);f:SetBackdropBorderColor(.65,.65,.65,1)
     f:SetScript("OnDragStart",function() f:StartMoving() end);f:SetScript("OnDragStop",function() f:StopMovingOrSizing() end)
@@ -61,7 +62,7 @@ function O:Create(c)
     local page=self.appearance
     self:Section(page,"Appearance",16,-80,288,278)
     self:Section(page,"Navigation",316,-80,288,168)
-    self:Section(page,"Position",316,-272,288,153)
+    self:Section(page,"Position",316,-272,288,191)
     self:Label(page,"Font",28,-105)
     self.font=self:Dropdown(page,28,-125,260,"Expressway",function()
         local names={Expressway=true,["Game font"]=true,Arial=true};local lsm=LibStub and LibStub("LibSharedMedia-3.0",true)
@@ -103,11 +104,16 @@ function O:Create(c)
     self.placement=self:Dropdown(page,328,-296,260,"Free (dragged)",function() return {
         {label="Free (dragged)",value="none"},{label="Left screen edge",value="left"},{label="Right screen edge",value="right"}
     } end,function(value) U:SetDock(c,value,true);c:ApplyProfile() end)
-    local hint=self:Label(page,"Drag to either edge to dock and hide. Click the edge tab to reopen.",328,-334,260,11,{.7,.7,.72});hint:SetWordWrap(true);hint:SetHeight(36)
-    self.resetPlacement=self:Button(page,"Reset placement",328,-376,124,function() c.profile.x=24;c.profile.y=-180;U:SetDock(c,"none",false);c:ApplyProfile() end)
-    self.togglePanel=self:Button(page,"Expand / tuck",464,-376,124,function() U:Toggle(c) end)
-    self.showPanel=self:Button(page,"Show panel",328,-404,124,function() c:ShowPanel(true) end)
-    self.hidePanel=self:Button(page,"Hide panel",464,-404,124,function() c:ShowPanel(false) end)
+    local layerLabel=self:Label(page,"Frame layer",328,-337,92)
+    self:Bound(layerLabel,92,24,"LEFT",page,"TOPLEFT",328,-346)
+    self.strata=self:Dropdown(page,432,-334,156,"High",function() return {
+        {label="Low",value="LOW"},{label="Medium",value="MEDIUM"},{label="High",value="HIGH"}
+    } end,function(value) c.profile.strata=value;c:ApplyProfile() end)
+    local hint=self:Label(page,"Drag to either edge to dock and hide. Click the edge tab to reopen.",328,-372,260,11,{.7,.7,.72});hint:SetWordWrap(true);hint:SetHeight(36)
+    self.resetPlacement=self:Button(page,"Reset placement",328,-414,124,function() c.profile.x=24;c.profile.y=-180;c.profile.dockPosition=.5;U:SetDock(c,"none",false);c:ApplyProfile() end)
+    self.togglePanel=self:Button(page,"Expand / tuck",464,-414,124,function() U:Toggle(c) end)
+    self.showPanel=self:Button(page,"Show panel",328,-442,124,function() c:ShowPanel(true) end)
+    self.hidePanel=self:Button(page,"Hide panel",464,-442,124,function() c:ShowPanel(false) end)
     local fontHint=self:Label(page,"Font size changes the island text. Scale changes the whole island.",28,-386,260,11,{.7,.7,.72});fontHint:SetWordWrap(true);fontHint:SetHeight(36)
     local profiles=self.profilePage;self:Section(profiles,"Profiles",16,-80,588,340)
     self:Label(profiles,"Active profile",28,-108)
@@ -127,7 +133,7 @@ function O:Create(c)
         if self.confirm~="reset" then self.confirm="reset";self:Refresh();return end;self:ProfileAction("ResetProfile")
     end)
     self.cancel=self:Button(profiles,"Cancel",328,-366,260,function() self.confirm=nil;self:Refresh() end)
-    self.status=self:Label(content,"",20,-442,580,11,{.8,.8,.8})
+    self.status=self:Label(content,"",20,-480,580,11,{.8,.8,.8})
     f:SetScript("OnHide",function() self:CloseColor();self.confirm=nil;self.name:ClearFocus();self.fontSize:ClearFocus();self.scaleEdit:ClearFocus();for _,d in ipairs(U.dropdowns or {}) do d:CloseMenu() end end)
     f:SetScript("OnShow",function()
         self:Refresh()
@@ -185,6 +191,7 @@ function O:Refresh(fontsReady)
     local c=self.owner;local p=c.profile;self.refreshing=true;self.font.value=p.font;self.font:SetDefaultText(p.font)
     self.fontSize:SetText(tostring(p.fontSize));self.scale:SetValue(p.scale*100);self.scaleEdit:SetText(tostring(math.floor(p.scale*100+.5)))
     self.placement.value=p.dock;self.placement:SetDefaultText(p.dock=="right" and "Right screen edge" or p.dock=="left" and "Left screen edge" or "Free (dragged)")
+    self.strata.value=p.strata;self.strata:SetDefaultText(p.strata=="LOW" and "Low" or p.strata=="MEDIUM" and "Medium" or "High")
     self.optionsTab.activeLine:SetShown(not self.profilesSelected);self.profilesTab.activeLine:SetShown(self.profilesSelected==true)
     self.optionsTab.text:SetTextColor(unpack(not self.profilesSelected and {.93,.94,.97} or gold));self.profilesTab.text:SetTextColor(unpack(self.profilesSelected and {.93,.94,.97} or gold))
     self.order.value=p.routeOrder;self.order:SetDefaultText(p.routeOrder=="time" and "Estimated time" or "Distance")
@@ -202,7 +209,7 @@ function O:Open()
     self:Layout();self:Refresh();self.frame:Show()
 end
 function O:Layout()
-    self.frame:SetScale(math.min(1,(UIParent:GetHeight()-24)/462,(UIParent:GetWidth()-24)/620))
+    self.frame:SetScale(math.min(1,(UIParent:GetHeight()-24)/dialogHeight,(UIParent:GetWidth()-24)/dialogWidth))
     for _,entry in ipairs(self.bounded) do
         local t=entry.text;t:SetScale(1);t:SetHeight(0)
         local natural=t:GetUnboundedStringWidth()+4;local height=t:GetStringHeight()+2

@@ -224,8 +224,32 @@ function U:PauseIcon(c)
     self:Tip(self.pause,c.nav.state=="nearby" and "Confirm arrival" or c.manualPause and "Resume navigation" or "Pause navigation")
 end
 function U:SetDock(c,side,tuck)
+    self:FinishHandleDrag()
     c.profile.dock=(side=="left" or side=="right") and side or "none";c.tucked=tuck and c.profile.dock~="none" or false;c.hidden=false
     self:Layout(c)
+end
+function U:HandleTravel()
+    return math.max(0,UIParent:GetHeight()*UIParent:GetEffectiveScale()-self.handle:GetHeight()*self.handle:GetEffectiveScale())
+end
+function U:PlaceHandle(c)
+    local side=c.profile.dock=="right" and "TOPRIGHT" or "TOPLEFT"
+    local travel=math.max(0,UIParent:GetHeight()/self.handle:GetScale()-self.handle:GetHeight())
+    self.handle:ClearAllPoints();self.handle:SetPoint(side,UIParent,side,0,-c.profile.dockPosition*travel)
+end
+function U:FinishHandleDrag()
+    self.handleDrag=nil
+    if self.handle then self.handle:SetScript("OnUpdate",nil) end
+end
+function U:UpdateHandleDrag(c)
+    local drag=self.handleDrag;if not drag then return end
+    if drag.profile~=c.profile or drag.side~=c.profile.dock or c.profile.locked or c.hidden or not c.tucked or drag.travel~=self:HandleTravel() then
+        self:FinishHandleDrag();return
+    end
+    local _,y=N.Adapter.Call(GetCursorPosition)
+    if N.Adapter.Number(y) and drag.travel>0 then
+        c.profile.dockPosition=math.max(0,math.min(1,drag.position+(drag.cursorY-y)/drag.travel))
+        self:PlaceHandle(c)
+    end
 end
 function U:WrappedHeight(text,minimum)
     text:SetHeight(0)
@@ -266,7 +290,19 @@ function U:SavePlacement(c)
 end
 function U:FinishResize(c)
     if not self.resizing then return end
-    self.frame:StopMovingOrSizing();self:SavePlacement(c);self.resizing=false
+    self.resizing=false;self.frame:StopMovingOrSizing()
+    if self.resizeProfile==c.profile then self:SavePlacement(c) end
+    self.resizeProfile=nil;self.resizeMode=nil
+end
+function U:ResizeMode(c)
+    local results=not (c.compact and c.nav.route) and (c.matches and #c.matches>0 or not c.matches and #c.results>0)
+    return results and "results" or "width"
+end
+function U:FitAction(button,width,minimum)
+    button:SetWidth(width);button.text:ClearAllPoints();button.text:SetPoint("TOPLEFT",8,0)
+    button.text:SetWidth(math.max(1,width-16));button.text:SetWordWrap(true);button.text:SetNonSpaceWrap(true)
+    local height=math.max(minimum or 28,self:WrappedHeight(button.text)+12)
+    button:SetHeight(height);button.text:SetHeight(height);return height
 end
 function U:ScrollIndicator(offset)
     local range=self.bodyScrollRange or 0;local visible=self.bodyScroll:GetHeight()
@@ -356,7 +392,7 @@ function U:Edit(parent,label,y,origin)
 end
 function U:Create(c)
     self.owner=c;local f=CreateFrame("Frame","AsTheCrowFliesPanel",UIParent);self.frame=f
-    f:SetMovable(true);f:SetResizable(true);f:EnableMouse(true);f:SetClampedToScreen(true);f:SetFrameStrata("MEDIUM");self:Surface(f)
+    f:SetMovable(true);f:SetResizable(true);f:EnableMouse(true);f:SetClampedToScreen(true);f:SetFrameStrata(c.profile.strata);f:SetFrameLevel(100);self:Surface(f)
     local header=CreateFrame("Frame",nil,f);self.header=header;header:SetPoint("TOPLEFT");header:SetSize(c.profile.width-78,44);header:EnableMouse(true);header:RegisterForDrag("LeftButton")
     header:SetScript("OnDragStart",function() if not c.profile.locked and not self.resizing then self.dragging=true;f:StartMoving() end end)
     header:SetScript("OnDragStop",function()
@@ -369,7 +405,7 @@ function U:Create(c)
     end)
     local eagle=header:CreateTexture(nil,"ARTWORK");self.eagle=eagle;eagle:SetTexture(MEDIA.."eagle.tga");eagle:SetPoint("LEFT",header,"LEFT",14,0);eagle:SetSize(24,24);eagle:SetVertexColor(.88,.66,.16)
     self.title=self:Text(header,"AS THE CROW FLIES",11,46,0,184,24);self.title:ClearAllPoints();self.title:SetPoint("LEFT",header,"LEFT",46,0)
-    self.title.atcfFixedFont=true;self:Font(self.title,11)
+    self.title.atcfFixedFont=true;self:Font(self.title,11);self.title:SetWordWrap(true);self.title:SetHeight(32)
     self.settings=self:Button(f,"...",c.profile.width-68,-9,26,26,function() self.menu:SetShown(not self.menu:IsShown()) end)
     self:Icon(self.settings,"cog")
     self.settings:SetFrameLevel(header:GetFrameLevel()+3);self:Tip(self.settings,"Navigation menu")
@@ -444,26 +480,43 @@ function U:Create(c)
     end)
     self:PauseIcon(c)
     self.fold=self:Button(f,"Fold",14,-125,50,30,function() c.compact=true;c:Refresh() end)
-    local handle=CreateFrame("Button",nil,UIParent);self.handle=handle;handle:SetSize(24,64);handle:SetFrameStrata("MEDIUM")
+    local handle=CreateFrame("Button",nil,UIParent);self.handle=handle;handle:SetSize(24,64);handle:SetFrameStrata(c.profile.strata);handle:SetFrameLevel(100);handle:RegisterForDrag("LeftButton")
     handle.bg=self:Rectangle(handle,{.13,.14,.17,1});handle.normalColor={.13,.14,.17,1};handle.hoverColor={.22,.24,.28,1}
-    handle.text=self:Text(handle,">",16,0,0,24,64);handle.text:SetJustifyH("CENTER");handle:SetScript("OnClick",function() c.tucked=false;self:Layout(c) end)
-    self:Tip(handle,"Expand navigation")
+    handle.text=self:Text(handle,">",16,0,0,24,64);handle.text:SetJustifyH("CENTER")
+    handle:SetScript("OnMouseDown",function(_,button) if button=="LeftButton" then self.handleSuppressClick=false end end)
+    handle:SetScript("OnDragStart",function()
+        if c.profile.locked or c.hidden or not c.tucked then return end
+        self.handleSuppressClick=true
+        local _,y=N.Adapter.Call(GetCursorPosition)
+        if not N.Adapter.Number(y) then return end
+        self.handleDrag={profile=c.profile,side=c.profile.dock,cursorY=y,position=c.profile.dockPosition,travel=self:HandleTravel()}
+        handle:SetScript("OnUpdate",function() self:UpdateHandleDrag(c) end)
+    end)
+    local function finishHandle() self:UpdateHandleDrag(c);self:FinishHandleDrag() end
+    handle:SetScript("OnDragStop",finishHandle)
+    handle:SetScript("OnMouseUp",function(_,button) if button=="LeftButton" then finishHandle() end end)
+    handle:SetScript("OnHide",function() self:FinishHandleDrag() end)
+    handle:SetScript("OnClick",function() if not self.handleSuppressClick then c.tucked=false;self:Layout(c) end end)
+    self:Tip(handle,"Click to expand. Drag up or down to move.")
     local grip=CreateFrame("Button",nil,f);self.resizeGrip=grip;grip:SetSize(18,18);grip:SetPoint("BOTTOMRIGHT",f,"BOTTOMRIGHT",-1,1);grip:SetFrameLevel(f:GetFrameLevel()+10)
     for _,length in ipairs({4,8,12}) do
         local line=grip:CreateLine(nil,"ARTWORK");line:SetThickness(1.5);line:SetColorTexture(.75,.76,.8,1)
         line:SetStartPoint("BOTTOMRIGHT",grip,-length,3);line:SetEndPoint("BOTTOMRIGHT",grip,-3,length)
     end
-    self:Tip(grip,"Drag to resize results")
+    self:Tip(grip,"Drag to resize")
     grip:SetScript("OnMouseDown",function(_,button)
         if button~="LeftButton" or c.profile.locked or self.dragging or not grip:IsShown() then return end
+        self.resizeMode=self:ResizeMode(c);self.resizeProfile=c.profile
         self.resizeChrome=f:GetHeight()-self.bodyScroll:GetHeight();self.resizing=true
-        self:SavePlacement(c);c.profile.dock="none";f:StartSizing("BOTTOMRIGHT")
+        self:SavePlacement(c);c.profile.dock="none";f:StartSizing(self.resizeMode=="results" and "BOTTOMRIGHT" or "RIGHT")
     end)
     grip:SetScript("OnMouseUp",function(_,button) if button=="LeftButton" and self.resizing then self:FinishResize(c);c:Refresh() end end)
     grip:SetScript("OnHide",function() self:FinishResize(c) end)
     f:SetScript("OnSizeChanged",function(_,width,height)
         if not self.resizing or self.resizeLayout then return end
-        c.profile.width=math.max(280,math.min(640,width));c.profile.resultsHeight=math.max(100,math.min(560,height-self.resizeChrome))
+        if self.resizeProfile~=c.profile or c.profile.locked then self:FinishResize(c);return end
+        c.profile.width=math.max(N.Settings.minWidth,math.min(N.Settings.maxWidth,width))
+        if self.resizeMode=="results" then c.profile.resultsHeight=math.max(100,math.min(560,height-self.resizeChrome)) end
         self.resizeLayout=true;self:Refresh(c);self.resizeLayout=false
     end)
     f:SetScript("OnHide",function()
@@ -483,10 +536,12 @@ function U:Create(c)
     UISpecialFrames=UISpecialFrames or {};table.insert(UISpecialFrames,"AsTheCrowFliesMenu")
 end
 function U:Layout(c)
+    if self.resizing and (self.resizeProfile~=c.profile or c.profile.locked or self.resizeMode~=self:ResizeMode(c)) then self:FinishResize(c) end
     -- Native dragging owns the frame anchor until release. Refreshes during
     -- guidance, indexing or font registration must not snap it back.
     if self.dragging then return end
     local f,p=self.frame,c.profile;local scale=self.resizing and f:GetScale() or math.min(p.scale,UIParent:GetHeight()/660,UIParent:GetWidth()/(p.width+16))
+    f:SetFrameStrata(p.strata);self.handle:SetFrameStrata(p.strata)
     if not self.resizing then f:SetScale(scale);f:SetWidth(p.width);f:ClearAllPoints() end
     local function move(control,x,y) control:ClearAllPoints();control:SetPoint("TOPLEFT",x,y) end
     self.header:SetWidth(p.width-78);self.title:SetWidth(p.width-124)
@@ -500,20 +555,21 @@ function U:Layout(c)
     self.from:SetWidth(p.width-fieldLeft-42);self.to:SetWidth(p.width-fieldLeft-42);self.body:SetWidth(p.width-28);self.bodyScroll:SetWidth(p.width-28)
     move(self.filterButton,p.width-38,-42);self.note:SetWidth(p.width-28)
     self.guidance:SetWidth(p.width-28);self.next:SetWidth(p.width-72);self.remaining:SetWidth(p.width-72);self.directionNote:SetWidth(p.width-28)
-    self.expand:SetWidth(p.width-96);self.expand.text:SetWidth(p.width-112)
     for _,row in ipairs(self.rows) do row:SetWidth(p.width-28);row.lockedText:SetWidth(p.width-40) end
     local sw,sh=UIParent:GetWidth()/scale,UIParent:GetHeight()/scale
     local x=p.dock=="right" and sw-p.width-8 or p.dock=="left" and 8 or p.x
-    local y=math.max(-(sh-math.min(f:GetHeight(),sh)),math.min(0,p.y))
+    local top=p.dock~="none" and -p.dockPosition*math.max(0,sh-self.handle:GetHeight()) or p.y
+    local y=math.max(-(sh-math.min(f:GetHeight(),sh)),math.min(0,top))
     if not self.resizing then
         f:SetPoint("TOPLEFT",UIParent,"TOPLEFT",math.max(0,math.min(sw-p.width,x)),y)
     end
     if self.resizeGrip:IsShown() then
+        local results=self:ResizeMode(c)=="results"
         local chrome=math.max(0,f:GetHeight()-self.bodyScroll:GetHeight())
-        f:SetResizeBounds(280,chrome+100,math.min(640,sw-16),math.max(chrome+100,math.min(chrome+560,sh-16)))
+        local minimum=results and chrome+100 or 1
+        f:SetResizeBounds(N.Settings.minWidth,minimum,math.max(N.Settings.minWidth,math.min(N.Settings.maxWidth,sw-16)),math.max(minimum,results and math.min(chrome+560,sh-16) or sh-16))
     end
-    self.handle:SetScale(scale);self.handle:ClearAllPoints()
-    self.handle:SetPoint(p.dock=="right" and "RIGHT" or "LEFT",UIParent,p.dock=="right" and "RIGHT" or "LEFT",0,0)
+    self.handle:SetScale(scale);self:UpdateHandleDrag(c);self:PlaceHandle(c)
     self:Icon(self.handle,p.dock=="right" and "left" or "right");self.handle:SetShown(not c.hidden and c.tucked==true);f:SetShown(not c.hidden and not c.tucked)
 end
 function U:LayoutGuidance(c)
@@ -526,17 +582,20 @@ function U:LayoutGuidance(c)
     if message~="" then body=body+6+self:WrappedHeight(self.directionNote,16) end
     self.guidance:SetHeight(body)
     local footer=48+body+10
+    local actionHeight=self:FitAction(self.expand,c.profile.width-96,28)
     for _,entry in ipairs({{self.expand,14},{self.pause,c.profile.width-76},{self.stop,c.profile.width-42}}) do
-        entry[1]:ClearAllPoints();entry[1]:SetPoint("TOPLEFT",entry[2],-footer)
+        local offset=entry[1]==self.expand and 0 or (actionHeight-entry[1]:GetHeight())/2
+        entry[1]:ClearAllPoints();entry[1]:SetPoint("TOPLEFT",entry[2],-footer-offset)
     end
-    local height=footer+40;local changed=self.frame:GetHeight()~=height;self.frame:SetHeight(height);return changed
+    local height=footer+actionHeight+22;local changed=self.frame:GetHeight()~=height;self.frame:SetHeight(height);return changed
 end
 function U:Refresh(c)
+    if self.resizing and (self.resizeProfile~=c.profile or c.profile.locked or self.resizeMode~=self:ResizeMode(c)) then self:FinishResize(c) end
     if not self.dragging and not self.resizing then self.frame:SetScale(math.min(c.profile.scale,UIParent:GetHeight()/660,UIParent:GetWidth()/(c.profile.width+16))) end
     if self.menuLock then self.menuLock.text:SetText(c.profile.locked and "Unlock panel" or "Lock panel") end
     local compact=c.compact and c.nav.route~=nil
     local expanded=c.searching or c.matches~=nil or c.destination~=nil or #c.results>0 or c.nav.route~=nil or c.planned
-    self.resizeGrip:SetShown(not c.profile.locked and not compact and expanded and ((c.matches and #c.matches>0) or #c.results>0))
+    self.resizeGrip:SetShown(not c.profile.locked)
     self.editor:SetShown(not compact);self.body:SetShown(not compact and expanded);self.bodyScroll:SetShown(not compact and expanded);self.guidance:SetShown(compact);self.expand:SetShown(compact);self.go:SetShown(not compact and expanded and (c.matches~=nil or #c.results==0));self.note:SetShown(not compact and expanded)
     self:ScrollIndicator(self.bodyScroll:GetVerticalScroll())
     self.stop:SetShown(c.nav.route~=nil);self.fold:SetShown(not compact and c.nav.route~=nil)
@@ -633,18 +692,25 @@ function U:Refresh(c)
         end
         self.note:SetText(message or "");self.note:SetShown(message~=nil)
         local messageHeight=message and (self:WrappedHeight(self.note,32)+10) or 0
-        local hasFooter=self.go:IsShown() or self.stop:IsShown() or self.fold:IsShown()
+        self.go.text:SetText(c:PrimaryActionLabel());self.go:SetEnabled(not c.searching and not (c.matches and #c.matches==0))
+        local foldWidth=math.max(50,math.ceil(self.fold.text:GetUnboundedStringWidth())+16)
+        local foldHeight=self:FitAction(self.fold,foldWidth,30)
+        local available=c.profile.width-(c.nav.route and foldWidth+74 or 28)
+        local goWidth=math.min(available,math.ceil(self.go.text:GetUnboundedStringWidth())+32)
+        local goHeight=self:FitAction(self.go,goWidth,30)
+        local footerHeight=math.max(self.go:IsShown() and goHeight or 0,self.fold:IsShown() and foldHeight or 0,self.stop:IsShown() and 28 or 0)+22
         local scale=self.resizing and self.frame:GetScale() or math.min(c.profile.scale,UIParent:GetHeight()/660,UIParent:GetWidth()/(c.profile.width+16))
-        local limit=(UIParent:GetHeight()-16)/scale-bodyTop-messageHeight-(hasFooter and 50 or 20)
+        local limit=(UIParent:GetHeight()-16)/scale-bodyTop-messageHeight-footerHeight-8
         local requested=c.profile.resultsHeight
-        if self.resizing then
+        local resizingResults=self.resizing and self.resizeMode=="results"
+        if resizingResults then
             -- Width changes can wrap fixed headings/status text while native
             -- sizing owns the outer frame. Rebudget the viewport immediately.
-            self.resizeChrome=bodyTop+messageHeight+(bodyHeight>0 and 8 or 0)+(hasFooter and 42 or 12)
+            self.resizeChrome=bodyTop+messageHeight+(bodyHeight>0 and 8 or 0)+footerHeight
             requested=math.max(1,math.min(560,self.frame:GetHeight()-self.resizeChrome))
             c.profile.resultsHeight=math.max(100,requested)
         end
-        local visible=math.max(0,math.min(self.resizing and requested or bodyHeight,requested,math.max(1,limit)))
+        local visible=math.max(0,math.min(resizingResults and requested or bodyHeight,requested,math.max(1,limit)))
         self.bodyScroll:SetHeight(math.max(1,visible));self.bodyScrollRange=math.max(0,bodyHeight-visible)
         local key=c.matches or c.results;local selected=c.matches and (c.highlight or 1) or (c.selected or 1)
         local scroll=self.scrollResults~=key and 0 or self.bodyScroll:GetVerticalScroll()
@@ -666,16 +732,10 @@ function U:Refresh(c)
         end
         self.note:ClearAllPoints();self.note:SetPoint("TOPLEFT",14,-y)
         local footer=y+messageHeight
-        self.go.text:SetText(c:PrimaryActionLabel());self.go:SetEnabled(not c.searching and not (c.matches and #c.matches==0))
-        local available=c.profile.width-(c.nav.route and 124 or 28)
-        local labelWidth=math.ceil(self.go.text:GetUnboundedStringWidth())
-        local goWidth=math.min(available,labelWidth+32)
-        local inset=math.min(16,math.max(4,(goWidth-labelWidth)/2))
-        self.go:SetWidth(goWidth);self.go.text:ClearAllPoints();self.go.text:SetPoint("TOPLEFT",inset,0);self.go.text:SetWidth(goWidth-inset*2)
-        self.go:ClearAllPoints();self.go:SetPoint("TOPLEFT",(c.nav.route and 74 or 14)+(available-goWidth)/2,-footer)
+        self.go:ClearAllPoints();self.go:SetPoint("TOPLEFT",(c.nav.route and foldWidth+24 or 14)+(available-goWidth)/2,-footer)
         self.stop:ClearAllPoints();self.stop:SetPoint("TOPLEFT",c.profile.width-42,-footer)
         self.fold:ClearAllPoints();self.fold:SetPoint("TOPLEFT",14,-footer)
-        if not self.resizing then self.frame:SetHeight(expanded and (footer+(hasFooter and 42 or 12)) or 129) end
+        if not resizingResults then self.frame:SetHeight(expanded and (footer+footerHeight) or 139) end
     end
     self:Layout(c)
 end

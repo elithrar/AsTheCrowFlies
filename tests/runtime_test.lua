@@ -1,4 +1,4 @@
-local frames,timers,hooks={},{},{};local now=0
+local frames,timers,hooks={},{},{};local now=0;local cursorX,cursorY=400,500
 local methods={}
 function methods:SetPoint(...) local args={...};self.point=args;if #args==5 then assert(type(args[4])=='number' and type(args[5])=='number','SetPoint requires numeric offsets') end end
 function methods:ClearAllPoints() self.point=nil end
@@ -34,8 +34,10 @@ end
 function methods:SetScale(v) self.scale=v end
 function methods:GetScale() return self.scale or 1 end
 function methods:GetEffectiveScale() return self:GetScale()*(self.parent and self.parent:GetEffectiveScale() or 1) end
-function methods:GetFrameLevel() return self.level or 1 end
+function methods:GetFrameLevel() return self.level or (self.parent and self.parent:GetFrameLevel()+1) or 1 end
 function methods:SetFrameLevel(v) self.level=v end
+function methods:SetFrameStrata(v) assert(v=='LOW' or v=='MEDIUM' or v=='HIGH' or v=='DIALOG' or v=='TOOLTIP');self.strata=v end
+function methods:GetFrameStrata() return self.strata or (self.parent and self.parent:GetFrameStrata()) or 'MEDIUM' end
 function methods:SetTexCoord(...) self.coords={...} end
 function methods:SetEnabled(v) self.enabled=v end
 function methods:SetBackdrop(v) self.backdrop=v end
@@ -92,8 +94,9 @@ function methods:ClearFocus() self.focus=false end
 function methods:SetFocus() self.focus=true end
 function methods:SetChecked(v) self.checked=v end
 function methods:GetChecked() return self.checked end
-local noop={'SetAllPoints','SetShadowColor','SetShadowOffset','SetAutoFocus','SetMaxLetters','SetTextInsets','HighlightText','SetMovable','EnableMouse','SetClampedToScreen','SetFrameStrata','RegisterForDrag','StartMoving','StopMovingOrSizing','EnableMouseWheel','SetOwner','SetDrawLayer'}
+local noop={'SetAllPoints','SetShadowColor','SetShadowOffset','SetAutoFocus','SetMaxLetters','SetTextInsets','HighlightText','SetMovable','EnableMouse','SetClampedToScreen','RegisterForDrag','StartMoving','StopMovingOrSizing','EnableMouseWheel','SetOwner','SetDrawLayer'}
 for _,name in ipairs(noop) do methods[name]=function() end end
+function GetCursorPosition() return cursorX,cursorY end
 local function object(name)
     local f=setmetatable({scripts={},events={},name=name},{__index=methods});frames[#frames+1]=f;if name then _G[name]=f end;return f
 end
@@ -458,7 +461,7 @@ test('bounded trainer results retain width across compact state and reflow profi
     C.filter={categories={class=true},classes={MAGE=true},professions={}};C.results={route,route,route};C.matches=nil;C.nav.route=route;C.nav.leg=1;C.nav.state='walking';C.profile.scale=1.6
     C.nav.route=nil;C.compact=false;C.status=nil;C:Refresh()
     assert(not U.go:IsShown() and not U.stop:IsShown() and not U.fold:IsShown())
-    assert(U.frame:GetHeight()==U.bodyTop+U.bodyScroll:GetHeight()+20,'results without footer controls retain grip padding')
+    assert(U.frame:GetHeight()>=U.bodyTop+U.bodyScroll:GetHeight()+22,'results without footer controls retain grip padding')
     C.nav.route=route
     UIParent:SetSize(1280,720)
     for _,width in ipairs({280,320}) do
@@ -547,13 +550,13 @@ local function filterDescription()
 end
 test('minimal idle expands on typing and clear Escape Stop cancel queued searches',function()
     C:Stop();C.destination=nil;C.origin=nil;C.query='';C.status=nil;C:BindFilters();C:Filter('all');U.to.scripts.OnEscapePressed();C:Refresh()
-    assert(U.frame:GetHeight()==129 and not U.body:IsShown() and not U.go:IsShown() and not U.stop:IsShown() and not U.note:IsShown())
+    assert(U.frame:GetHeight()==139 and not U.body:IsShown() and not U.go:IsShown() and not U.stop:IsShown() and not U.note:IsShown())
     assert(not U.category and not U.specialization and U.filterButton:IsShown())
     U.to:SetFocus();U.to:SetText('mage');U.to.scripts.OnTextChanged(nil,true)
-    assert(C.searching and U.frame:GetHeight()>129 and U.body:IsShown())
-    U.to.scripts.OnEscapePressed();flushSearch();assert(not C.matches and not C.searching and U.frame:GetHeight()==129 and not U.to:HasFocus())
+    assert(C.searching and U.frame:GetHeight()>139 and U.body:IsShown())
+    U.to.scripts.OnEscapePressed();flushSearch();assert(not C.matches and not C.searching and U.frame:GetHeight()==139 and not U.to:HasFocus())
     U.to:SetFocus();U.to:SetText('bank');U.to.scripts.OnTextChanged(nil,true)
-    U.to:SetText('');U.to.scripts.OnTextChanged(nil,true);flushSearch();assert(not C.matches and U.frame:GetHeight()==129 and C.query=='')
+    U.to:SetText('');U.to.scripts.OnTextChanged(nil,true);flushSearch();assert(not C.matches and U.frame:GetHeight()==139 and C.query=='')
     U.to:ClearFocus();C:Refresh();assert(U.to:GetText()=='');C:Plan();assert(#C.results==0 and C.status:find('Choose'))
     U.to:SetText('trainer');U.to.scripts.OnTextChanged(nil,true);C:Stop();flushSearch();assert(not C.matches and not C.searching)
     U.to:ClearFocus();C.query='';C:Refresh()
@@ -628,7 +631,7 @@ test('edge selection and unlocked dragging tuck on the correct side without chan
     end}
     O.placement.menu(nil,root);actions['Right screen edge']()
     assert(C.profile.dock=='right' and C.tucked and U.handle:IsShown() and not U.frame:IsShown() and C.nav==state)
-    assert(U.handle.point[1]=='RIGHT');U.handle.scripts.OnClick();assert(not C.tucked and U.frame:IsShown())
+    assert(U.handle.point[1]=='TOPRIGHT');U.handle.scripts.OnMouseDown(U.handle,'LeftButton');U.handle.scripts.OnClick();assert(not C.tucked and U.frame:IsShown())
     C.profile.locked=true;local x,y=C.profile.x,C.profile.y
     U.header.scripts.OnDragStart();U.header.scripts.OnDragStop()
     assert(not C.tucked and C.profile.dock=='right' and C.profile.x==x and C.profile.y==y,'locked drag is inert')
@@ -692,7 +695,7 @@ test('compact route controls pause resume and clear stale arrival dwell',functio
     C:Stop();local p=A.Position();local goal=N.Model.Copy(p);goal.x=p.x+1000;goal.id='compact';goal.name='Kelv Sternhammer'
     local route=N.Routes.Summary({{mode='walk',start=p,finish=goal,distance=1000,quality='bearing'}},goal,C:Context())
     C.results={route};C.selected=1;C.origin=nil;C.matches=nil;C.destination=goal;C:Go()
-    assert(C.compact and U.frame:GetHeight()<160 and U.pause.iconKind=='pause' and U.stop.iconKind=='close')
+    assert(C.compact and U.frame:GetHeight()<190 and U.pause.iconKind=='pause' and U.stop.iconKind=='close')
     assert(U.stop.normalColor[1]>U.stop.normalColor[2]*3)
     C.nav.dwell=1;C.nav.previous=p;C.nav.previousTime=1;U.pause.scripts.OnClick()
     assert(C.manualPause and U.pause.iconKind=='play' and not C.nav.dwell and not C.nav.previous)
@@ -848,7 +851,7 @@ test('native selected dropdown labels follow the new profile before generation',
 end)
 
 test('structured compact matches show more rows and scroll all results without changing selection',function()
-    C:Stop();C.origin=nil;C.status=nil;C.destination=nil;C.searchOrigin=false;C.profile.fontSize=13;C:ApplyProfile()
+    C:Stop();local saved=N.Model.Copy(C.profile);C.origin=nil;C.status=nil;C.destination=nil;C.searchOrigin=false;C.profile.width=304;C.profile.fontSize=13;C:ApplyProfile()
     local p=A.Position();C.matches={};C.highlight=1
     for i=1,40 do local goal=N.Model.Copy(p);goal.name='Trainer '..i;goal.role='Warrior Trainer';goal.zone='Ironforge';goal.category='class';goal.x=p.x+1700+i;C.matches[i]=goal end
     C:Refresh();local row=U.rows[1]
@@ -860,7 +863,7 @@ test('structured compact matches show more rows and scroll all results without c
     C.highlight=40;C:Refresh();assert(U.bodyScroll:GetVerticalScroll()>0)
     local highlight=C.highlight;U.body.scripts.OnMouseWheel(nil,-1000);assert(C.highlight==highlight)
     assert(U.bodyScroll:GetVerticalScroll()==U.bodyScrollRange)
-    U.rows[40].scripts.OnClick();assert(C.destination.name=='Trainer 40');C:Stop();C.destination=nil
+    U.rows[40].scripts.OnClick();assert(C.destination.name=='Trainer 40');C:Stop();C.destination=nil;C.profile=saved;C:ApplyProfile()
 end)
 
 test('result distance uses preview origin and flight route ETA retains the planned transport cost',function()
@@ -878,7 +881,7 @@ end)
 test('native resize persists bounded results geometry and ends on release lock or hide',function()
     C:Stop();C:ShowPanel(true);local saved=N.Model.Copy(C.profile);local p=A.Position();p.name='Resize target';p.role='Trainer';p.zone='Ironforge';C.matches={}
     for i=1,40 do C.matches[i]=p end;C.highlight=1;C.profile.locked=false;C:Refresh()
-    assert(U.resizeGrip:IsShown() and U.frame.resizable and U.frame.resizeBounds[1]==280)
+    assert(U.resizeGrip:IsShown() and U.frame.resizable and U.frame.resizeBounds[1]==220)
     local anchor=U.frame.point;U.resizeGrip.scripts.OnMouseDown(nil,'RightButton');assert(not U.resizing)
     U.resizeGrip.scripts.OnMouseDown(nil,'LeftButton');assert(U.resizing and U.frame.sizing=='BOTTOMRIGHT' and C.profile.dock=='none')
     local height=U.resizeChrome+410;U.frame:SetSize(460,height);U.frame.scripts.OnSizeChanged(U.frame,460,height)
@@ -890,6 +893,112 @@ test('native resize persists bounded results geometry and ends on release lock o
     U.resizeGrip.scripts.OnMouseDown(nil,'LeftButton');assert(not U.resizing)
     C.profile.locked=false;C:Refresh();U.resizeGrip.scripts.OnMouseDown(nil,'LeftButton');C:ShowPanel(false);assert(not U.resizing)
     for k,v in pairs(saved) do C.profile[k]=v end;C:ShowPanel(true);C:Stop();C:ApplyProfile()
+end)
+
+test('idle empty and compact views resize width without changing remembered results height',function()
+    C:Stop();C:ShowPanel(true);local saved=N.Model.Copy(C.profile);local oldFilter=C.filter
+    C.profile.locked=false;C.profile.width=240;C.profile.resultsHeight=417;C.profile.fontSize=13;C.profile.scale=1
+    C.destination=nil;C.origin=nil;C.query='';C.status=nil;C.searchOrigin=false;C.filter={categories={},classes={},professions={}};C:ApplyProfile()
+    local function resize(width)
+        C:Refresh();assert(U.resizeGrip:IsShown(),'every unlocked panel view exposes its grip')
+        local height=U.frame:GetHeight();local results=C.profile.resultsHeight
+        U.resizeGrip.scripts.OnMouseDown(U.resizeGrip,'LeftButton');assert(U.resizing and U.frame.sizing=='RIGHT')
+        U.frame:SetSize(width,height);U.frame.scripts.OnSizeChanged(U.frame,width,height)
+        assert(C.profile.width==width and C.profile.resultsHeight==results,'width-only gestures preserve the results preference')
+        U.resizeGrip.scripts.OnMouseUp(U.resizeGrip,'LeftButton');assert(not U.resizing and U.frame:GetWidth()==width)
+        assert(N.Settings.Load(C.profile).width==width and U.frame:GetHeight()<300,'hidden results viewport cannot inflate compact states')
+    end
+    resize(220);assert(U.frame:GetHeight()==139 and not U.go:IsShown())
+    assert(U.frame:GetHeight()-19>=45-U.filterButton.point[3]+U.filterButton:GetHeight(),'idle grip clears the filter row')
+    C.matches={};C.status='No matching destinations';resize(260);assert(U.go:IsShown() and U.note:IsShown())
+    local p=A.Position();local goal=N.Model.Copy(p);goal.id='always-resize';goal.name='Kelv Sternhammer';goal.x=p.x+500
+    C.matches=nil;C.destination=goal;C.results={N.Routes.Summary({{mode='walk',start=p,finish=goal,distance=500,seconds=90}},goal,C:Context())};C:Go()
+    resize(230);assert(C.compact and U.stop:IsShown())
+    assert(U.frame:GetHeight()-19>=-U.stop.point[3]+U.stop:GetHeight(),'compact grip clears the stop action')
+    local compactWidth=C.profile.width;U.expand.scripts.OnClick();assert(U.frame:GetWidth()==compactWidth)
+    C.profile.locked=true;C:Refresh();assert(not U.resizeGrip:IsShown());U.resizeGrip.scripts.OnMouseDown(U.resizeGrip,'LeftButton');assert(not U.resizing)
+    C.profile=saved;C.filter=oldFilter;C.destination=nil;C:Stop();C:ApplyProfile()
+end)
+
+test('edge tab drags vertically in physical pixels without expanding and restores its preference',function()
+    C:Stop();C:ShowPanel(true);local saved=N.Model.Copy(C.profile);local parentScale=UIParent:GetScale();local oldX,oldY=cursorX,cursorY
+    C.profile.locked=false;C.profile.width=240
+    for _,scale in ipairs({.5,1,1.6}) do for _,side in ipairs({'left','right'}) do
+        UIParent:SetScale(.75);C.profile.scale=scale;C.profile.dockPosition=.5;C:ApplyProfile();U:SetDock(C,side,true)
+        local handle=U.handle;local beforeX=handle.point[4];local beforeY=handle.point[5]
+        local travel=UIParent:GetHeight()*UIParent:GetEffectiveScale()-handle:GetHeight()*handle:GetEffectiveScale()
+        cursorX,cursorY=400,500;handle.scripts.OnMouseDown(handle,'LeftButton');handle.scripts.OnDragStart(handle,'LeftButton');assert(U.handleDrag)
+        cursorX,cursorY=900,500+travel*.2;handle.scripts.OnUpdate(handle,.016)
+        assert(math.abs(C.profile.dockPosition-.3)<.0001 and C.tucked)
+        assert(handle.point[4]==beforeX and handle.point[5]>beforeY,'horizontal cursor movement cannot move the tab off its edge')
+        C:RefreshAppearance(false);assert(U.handleDrag and math.abs(C.profile.dockPosition-.3)<.0001)
+        cursorY=1e6;handle.scripts.OnUpdate(handle,.016);assert(C.profile.dockPosition==0 and handle.point[5]==0)
+        cursorY=-1e6;handle.scripts.OnUpdate(handle,.016);assert(C.profile.dockPosition==1)
+        assert(math.abs((-handle.point[5]+handle:GetHeight())*handle:GetEffectiveScale()-UIParent:GetHeight()*UIParent:GetEffectiveScale())<.0001,'whole tab stays within screen bounds')
+        handle.scripts.OnDragStop(handle);handle.scripts.OnMouseUp(handle,'LeftButton');handle.scripts.OnClick(handle,'LeftButton')
+        assert(not U.handleDrag and C.tucked and handle:IsShown(),'release after dragging must not also expand')
+        handle.scripts.OnMouseDown(handle,'LeftButton');handle.scripts.OnMouseUp(handle,'LeftButton');handle.scripts.OnClick(handle,'LeftButton')
+        assert(not C.tucked and U.frame:IsShown(),'the next genuine click still expands')
+        U:SetDock(C,side,true);local position=handle.point[5];assert(C.profile.dockPosition==1)
+        C.profile=N.Settings.Load(C.profile);C:ApplyProfile();U:SetDock(C,side,true);assert(C.profile.dockPosition==1 and handle.point[5]==position)
+    end end
+    UIParent:SetScale(parentScale);cursorX,cursorY=oldX,oldY;C.profile=saved;C:ShowPanel(true);C:ApplyProfile()
+end)
+
+test('edge drag handles unavailable cursor locking hiding side changes and profile replacement',function()
+    C:Stop();C:ShowPanel(true);local saved=N.Model.Copy(C.profile);local cursor=GetCursorPosition;local oldX,oldY=cursorX,cursorY;local parentScale=UIParent:GetScale()
+    C.profile.locked=false;C.profile.dockPosition=.4;C:ApplyProfile();U:SetDock(C,'right',true)
+    local handle=U.handle
+    local function begin()
+        cursorX,cursorY=300,500;handle.scripts.OnMouseDown(handle,'LeftButton');handle.scripts.OnDragStart(handle,'LeftButton');assert(U.handleDrag)
+    end
+    GetCursorPosition=function() return nil,nil end;handle.scripts.OnMouseDown(handle,'LeftButton');handle.scripts.OnDragStart(handle,'LeftButton')
+    assert(not U.handleDrag and C.profile.dockPosition==.4);GetCursorPosition=cursor
+    begin();GetCursorPosition=function() return nil,nil end;handle.scripts.OnUpdate(handle,.016);assert(C.profile.dockPosition==.4);GetCursorPosition=cursor
+    handle.scripts.OnMouseUp(handle,'LeftButton');assert(not U.handleDrag)
+    begin();C.profile.locked=true;C:Refresh();assert(not U.handleDrag)
+    local locked=C.profile.dockPosition;handle.scripts.OnMouseDown(handle,'LeftButton');handle.scripts.OnDragStart(handle,'LeftButton');assert(not U.handleDrag and C.profile.dockPosition==locked)
+    C.profile.locked=false;C:Refresh();begin();C:ShowPanel(false);assert(not U.handleDrag)
+    C:ShowPanel(true);U:SetDock(C,'right',true);begin();U:SetDock(C,'left',true);assert(not U.handleDrag and C.profile.dock=='left')
+    begin();local position=C.profile.dockPosition;UIParent:SetScale(.8);C.events.scripts.OnEvent(nil,'UI_SCALE_CHANGED')
+    assert(not U.handleDrag and C.profile.dockPosition==position,'a screen scale change cancels the old physical-pixel gesture')
+    UIParent:SetScale(parentScale);C:ApplyProfile()
+    begin();local prior=C.profile;local replacement=N.Model.Copy(prior);replacement.dockPosition=.8;C.profile=replacement;C:ApplyProfile()
+    cursorY=800;local update=handle.scripts.OnUpdate;if update then update(handle,.016) end
+    assert(not U.handleDrag and replacement.dockPosition==.8 and prior.dockPosition~=.8,'profile changes cannot receive an old gesture')
+    GetCursorPosition=cursor;cursorX,cursorY=oldX,oldY;C.profile=saved;C:ShowPanel(true);C:ApplyProfile()
+end)
+
+test('profile frame layer updates panel and tab while menus remain above both',function()
+    C:Stop();C:ShowPanel(true);local saved=N.Model.Copy(C.profile);local O=N.Options;local choose={}
+    local root={SetScrollMode=function() end,CreateRadio=function(_,label,selected,callback) choose[label]=callback;return {AddInitializer=function() end} end}
+    O.strata.menu(O.strata,root)
+    for _,entry in ipairs({{'Low','LOW'},{'Medium','MEDIUM'},{'High','HIGH'}}) do
+        choose[entry[1]]();assert(C.profile.strata==entry[2] and U.frame:GetFrameStrata()==entry[2] and U.handle:GetFrameStrata()==entry[2])
+        assert(U.frame:GetFrameLevel()==100 and U.handle:GetFrameLevel()==100)
+        assert(U.settings:GetFrameLevel()>U.header:GetFrameLevel() and U.resizeGrip:GetFrameLevel()>U.frame:GetFrameLevel())
+        assert(U.menu:GetFrameStrata()=='DIALOG' and O.frame:GetFrameStrata()=='DIALOG')
+        U:SetDock(C,'right',true);assert(U.handle:GetFrameStrata()==entry[2]);U.handle.scripts.OnMouseDown(U.handle,'LeftButton');U.handle.scripts.OnClick();assert(U.frame:GetFrameStrata()==entry[2])
+    end
+    C.profile=N.Settings.Load({strata='LOW',dockPosition=.2});C:ApplyProfile();assert(O.strata.value=='LOW' and U.frame:GetFrameStrata()=='LOW')
+    C.profile=saved;C:ShowPanel(true);C:ApplyProfile()
+end)
+
+test('narrow large-font navigation wraps its header and footer without covering other controls',function()
+    C:Stop();C:ShowPanel(true);local saved=N.Model.Copy(C.profile);local filter=C.filter;C.profile.width=220;C.profile.fontSize=18;C.profile.scale=1.6;C.profile.locked=false;C:ApplyProfile()
+    local p=A.Position();local goal=N.Model.Copy(p);goal.id='narrow-nav';goal.name='A narrow destination';goal.x=p.x+500
+    C.results={N.Routes.Summary({{mode='walk',start=p,finish=goal,distance=500,seconds=90}},goal,C:Context())};C.destination=goal;C.matches=nil;C:Go()
+    local function naturalHeight(text)
+        local bound=text:GetHeight();text:SetHeight(0);local height=text:GetStringHeight();text:SetHeight(bound);return height
+    end
+    assert(U.title.wordWrap and U.title:GetHeight()<=32 and naturalHeight(U.title)<=U.title:GetHeight())
+    assert(U.expand.text.wordWrap and U.expand:GetHeight()>28 and naturalHeight(U.expand.text)<=U.expand.text:GetHeight())
+    assert(U.expand.point[2]+U.expand:GetWidth()<=U.pause.point[2]-6 and U.frame:GetHeight()>=-U.expand.point[3]+U.expand:GetHeight()+22)
+    C.compact=false;C.destination=nil;C.matches={goal};C.searchOrigin=false;C.filter={categories={place=true},classes={},professions={}};C:Refresh()
+    assert(U.go.text:GetText()=='Compare matches' and U.go.text.wordWrap and U.go:GetHeight()>30)
+    assert(U.fold.point[2]+U.fold:GetWidth()+10<=U.go.point[2] and U.go.point[2]+U.go:GetWidth()<=U.stop.point[2]-8)
+    assert(naturalHeight(U.go.text)<=U.go.text:GetHeight() and U.frame:GetHeight()>=-U.go.point[3]+U.go:GetHeight()+22)
+    C.profile=saved;C.filter=filter;C.destination=nil;C:Stop();C:ApplyProfile()
 end)
 
 test('header movement survives background refresh and saves release position without snapping back',function()
@@ -911,7 +1020,7 @@ test('navigation typography grows ten percent and compass stays world relative a
     assert(U.cardinal:GetText()=='NW' and U.cardinal:IsShown() and U.next.textColor[1]==1 and U.next.fontFlags=='OUTLINE')
     assert(math.abs(U.next.fontSize-C.profile.fontSize*1.1)<.0001)
     U:Guidance(C,p,{speed=7,facing=math.pi/2},0);assert(U.cardinal:GetText()=='NW' and U.arrow.rotation~=rotation)
-    assert(U.tuck.iconKind=='back');U:SetDock(C,'right',true);assert(U.handle.iconKind=='left');U.handle.scripts.OnClick()
+    assert(U.tuck.iconKind=='back');U:SetDock(C,'right',true);assert(U.handle.iconKind=='left');U.handle.scripts.OnMouseDown(U.handle,'LeftButton');U.handle.scripts.OnClick()
     U.pause.scripts.OnClick();assert(not U.cardinal:IsShown());C:Stop();C.profile.dock='none';C:Refresh()
 end)
 test('matching bold weight is validated cached and downgraded without losing the regular family',function()
@@ -932,7 +1041,7 @@ end)
 
 test('editor labels fields action buttons and route action share consistent alignment at supported widths',function()
     C:Stop();local saved={profile=N.Model.Copy(C.profile),filter=C.filter,searchOrigin=C.searchOrigin};C.destination=nil;C.status=nil;C.matches={}
-    for _,width in ipairs({280,304,460,640}) do for _,size in ipairs({10,13,18}) do for _,scale in ipairs({.5,1,1.6}) do
+    for _,width in ipairs({220,240,280,304,460,640}) do for _,size in ipairs({10,13,18}) do for _,scale in ipairs({.5,1,1.6}) do
         C.profile.width=width;C.profile.fontSize=size;C.profile.scale=scale;C:ApplyProfile()
         assert(U.current.point[2]==U.filterButton.point[2] and U.current:GetWidth()==U.filterButton:GetWidth())
         assert(U.current.point[2]+U.current:GetWidth()==width-14 and U.tuck.point[2]==U.current.point[2])
@@ -947,7 +1056,7 @@ test('editor labels fields action buttons and route action share consistent alig
         assert(U.fieldLabels[1].point[3]-U.fieldLabels[1]:GetHeight()/2==U.from.point[3]-U.from:GetHeight()/2)
         for _,label in ipairs({'Find routes','Use origin','Compare matches'}) do
             C.searchOrigin=label=='Use origin';C.filter={categories=label=='Compare matches' and {place=true} or {},classes={},professions={}};C:Refresh()
-            assert(U.go.text:GetText()==label and U.go:GetHeight()==30 and U.go.text.justifyH=='CENTER')
+            assert(U.go.text:GetText()==label and U.go:GetHeight()>=30 and U.go.text.justifyH=='CENTER')
             assert(U.go.point[2]+U.go:GetWidth()/2==width/2)
             local textWidth=U.go.text:GetUnboundedStringWidth()
             assert(U.go:GetWidth()>=textWidth+32-.0001 and U.go:GetWidth()<=textWidth+33,'footer fits the label with comfortable padding: '..U.go:GetWidth()..' / '..textWidth)
@@ -1094,9 +1203,9 @@ test('width resize rebudgets wrapped headings without pushing content outside th
     C.results={route,route,route};C.destination=goal;C.status=nil;C:Refresh()
     local height=U.frame:GetHeight();local oldChrome=height-U.bodyScroll:GetHeight()
     U.resizeGrip.scripts.OnMouseDown(nil,'LeftButton');U.frame:SetSize(280,height);U.frame.scripts.OnSizeChanged(U.frame,280,height)
-    local chrome=U.bodyTop+20
+    local chrome=U.bodyTop+30
     assert(U.resizeChrome>oldChrome and math.abs(U.resizeChrome-chrome)<.001)
-    assert(U.bodyTop+U.bodyScroll:GetHeight()+20<=U.frame:GetHeight()+.001,'rewrapped content stays inside native frame height')
+    assert(U.bodyTop+U.bodyScroll:GetHeight()+22<=U.frame:GetHeight()+.001,'rewrapped content stays inside native frame height')
     assert(U.frame.resizeBounds[2]>=chrome+100)
     U.resizeGrip.scripts.OnMouseUp(nil,'LeftButton');C.profile=saved;C.destination=nil;C:Stop();C:ApplyProfile()
 end)
@@ -1122,7 +1231,7 @@ test('native icons keep atlas crops aspect ratio and font-independent pooled geo
     end
     assert(#frames==allocated and button.text:GetFont()==font,'repeated icon/scale changes allocate no frames or fonts')
     assert(button.pushedTexture==button.nativePushed and button.nativePushed.color[4]==.3)
-    U.handle.scripts.OnEnter();assert(U.handle.bg.color[1]==U.handle.hoverColor[1] and GameTooltip:GetText()=='Expand navigation')
+    U.handle.scripts.OnEnter();assert(U.handle.bg.color[1]==U.handle.hoverColor[1] and GameTooltip:GetText()=='Click to expand. Drag up or down to move.')
     U.handle.scripts.OnLeave();assert(U.handle.bg.color[1]==U.handle.normalColor[1])
     button.scripts.OnClick();assert(clicks==1);C_Texture=old
 end)
