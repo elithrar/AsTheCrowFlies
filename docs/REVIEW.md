@@ -1,5 +1,17 @@
 # Sequential review record
 
+## v0.1.1 panel sizing, docking and layers, 2026-10-11
+
+PR #4 began at `e901b81db39f4c77f987316af259fa705601662c`, based on main `38af6fd`. Independent reviewers checked maintainability, XPIsland-style options, supported native API contracts, narrow layouts and adversarial gesture/state transitions. The default width is now 240 (79% of 304), with a one-time migration that preserves custom sizes. The grip is available in all unlocked views, the edge tab remembers a normalized vertical position, and High layering defaults to the same level used by XPIsland with lower layers available in options.
+
+The adversarial pass reproduced and fixed three issues:
+
+- Completed resize/docking gestures left the open Position selector stale. A focused update now synchronizes its value, native generated caption and radio selection without re-running the full appearance pipeline.
+- Header dragging ignored hide/lock/profile changes. The gesture now belongs to its original profile and coordinate system, is canceled before layout's early return, and cannot write old coordinates into a replacement profile.
+- Native resizing remained active after display-size or scale changes. Those changes now end the old gesture and allow the panel to fit the new display.
+
+The follow-up implementation is committed at `cfde067df71749d7788b0dc2af54d1f5918f0ec6`. Independent re-review and the original adversarial probes found no remaining actionable source/offline issue. All 129 Lua 5.1 scenarios pass (46 model, 83 mocked runtime); tests now track native move/size state and cover real profile switching, stale release events, width changes, layer changes, display changes and open dropdown selection. Existing route, character-state, font and marker scenarios remain passing. Release validation passes 19 guard tests and five source-package tests with the private override test skipped. The full Forever flight data is unchanged. No WoW interaction, native rendering or live input-order claim is made.
+
 ## Pass 1 — requirements and evidence
 
 Re-read the product plan and subsequent user requirements. Later user requests supersede the original shared Go control and dense route-card specification.
