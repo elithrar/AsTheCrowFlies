@@ -317,7 +317,7 @@ function U:RouteTotal(route)
     return (M.Number(route.eta) and "Est. "..M.Minutes(route.eta) or "Time unavailable")..(yards and " • ~"..yards.." yards" or " • Distance unavailable")
 end
 function U:DestinationDetail(destination)
-    local categories={class="Class trainer",profession="Profession trainer",trainer="Trainer",auction="Auction house",quest="Quest NPC",flight="Flight point",place="Saved place"}
+    local categories={class="Class trainer",profession="Profession trainer",trainer="Trainer",auction="Auction house",transmog="Transmogrifier",quest="Quest NPC",flight="Flight point",place="Saved place"}
     return (destination.role or categories[destination.category] or "Destination")..(destination.zone and destination.zone~="" and (" • "..destination.zone) or "")
 end
 function U:SharedDestination(results)
@@ -412,7 +412,7 @@ function U:FilterMenu(parent,c)
             return row
         end
         checkbox(root,"All",function() return not M.HasFilter(c.filter) end,"all")
-        for _,entry in ipairs({{"Auction houses","auction"},{"Class trainers","class"},{"Profession trainers","profession"},{"Other trainers","trainer"},{"Quest NPCs","quest"},{"Flight points","flight"},{"Saved places","place"}}) do
+        for _,entry in ipairs({{"Auction houses","auction"},{"Class trainers","class"},{"Profession trainers","profession"},{"Other trainers","trainer"},{"Transmogrifiers","transmog"},{"Quest NPCs","quest"},{"Flight points","flight"},{"Saved places","place"}}) do
             local key=entry[2]
             local row=checkbox(root,entry[1],function() return c.filter.categories[key]==true end,"categories",key)
             if key=="class" or key=="profession" then

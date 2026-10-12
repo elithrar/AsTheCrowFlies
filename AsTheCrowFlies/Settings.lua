@@ -4,7 +4,7 @@ S.defaults={version=1,layoutVersion=2,width=240,resultsHeight=296,scale=1,font="
     colors={background={.045,.048,.062},accent={.78,.85,.61},text={.93,.94,.97}},searchFilters={categories={},classes={},professions={}}}
 function S.Filters(saved)
     saved=type(saved)=="table" and saved or {};local clean={categories={},classes={},professions={}}
-    local allowed={categories={"class","profession","auction","quest","trainer","flight","place"},
+    local allowed={categories={"class","profession","auction","transmog","quest","trainer","flight","place"},
         classes={"WARRIOR","PALADIN","HUNTER","ROGUE","PRIEST","SHAMAN","MAGE","WARLOCK","DRUID"},
         professions={"Alchemy","Blacksmithing","Enchanting","Engineering","Herbalism","Leatherworking","Mining","Skinning","Tailoring","Cooking","First Aid","Fishing"}}
     for group,values in pairs(allowed) do

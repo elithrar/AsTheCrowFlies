@@ -24,7 +24,7 @@ function M.Fold(s)
     return (s:gsub("[A-Z]",function(c) return string.char(c:byte()+32) end))
 end
 local classTokens={"WARRIOR","PALADIN","HUNTER","ROGUE","PRIEST","SHAMAN","MAGE","WARLOCK","DRUID"}
-local categoryWords={class="class trainer",profession="profession trainer",trainer="trainer",auction="auction house auctioneer",quest="quest npc",flight="flight master taxi",place="saved place location"}
+local categoryWords={class="class trainer",profession="profession trainer",trainer="trainer",auction="auction house auctioneer",transmog="transmog transmogrifier transmogrifiers transmogrification",quest="quest npc",flight="flight master taxi",place="saved place location"}
 local function active(set)
     if type(set)=="table" then for _,value in pairs(set) do if value==true then return true end end end
     return false

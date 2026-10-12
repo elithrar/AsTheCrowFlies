@@ -211,5 +211,70 @@
   "payloadSHA256": "e74250e6ed1ea8cf69e3869e161135bb1bbba195ba794f5e0ccd78fc30320db7",
   "hotfixes": "Not applied: candidate-only graph; runtime offered-itinerary validation required",
   "rights": "Derived static flight graph included in source and release packages; no third-party redistribution license inferred",
-  "groundCorridors": 0
+  "groundCorridors": 0,
+  "npcServices": {
+    "reviewedAt": "2026-10-12",
+    "targetBuild": "1.60.1.70338",
+    "scope": "Forever NPC identity and role corrections. Coordinates and faction eligibility are read from the optional provider at runtime.",
+    "exactBuildSpawnsVerified": false,
+    "providerVersion": "1.0.5",
+    "providerCommit": "e0a6eaa86f181ac99262e34126bcd2ed1a1712d6",
+    "providerTocSHA256": "d2ae0f70de2d3296ef50388ae5fdf3640975654895056bbd2325882806f4adcb",
+    "providerMapRegistryBuild": "1.60.1.69893",
+    "coordinatePolicy": "Preserve every provider spawn and runtime correction. Require valid native map projection. Retain provider confidence, faction, mobility and phase metadata. No bundled NPC coordinates.",
+    "mapEvidence": "The three AreaID to UiMapID mappings agree with the readable 70338 UiMap and UiMapAssignment tables and their pinned source hashes.",
+    "officialSource": "https://news.blizzard.com/en-us/article/24303313/world-of-warcraft-forever-deep-dive-panel-recap",
+    "entries": [
+      {
+        "npcID": 270513,
+        "name": "Spellweaver Thaldris",
+        "category": "transmog",
+        "faction": "Alliance",
+        "areaID": 36,
+        "uiMapID": 1416,
+        "worldMapID": 0,
+        "zone": "Alterac Mountains",
+        "providerSpawnRecords": 2,
+        "roleSource": "https://www.wowhead.com/forever/npc=270513/spellweaver-thaldris"
+      },
+      {
+        "npcID": 270581,
+        "name": "Fyrenz Vishonar",
+        "category": "transmog",
+        "faction": "Alliance",
+        "areaID": 1519,
+        "uiMapID": 1453,
+        "worldMapID": 0,
+        "zone": "Stormwind City",
+        "providerSpawnRecords": 3,
+        "roleSource": "https://www.wowhead.com/forever/npc=270581/fyrenz-vishonar"
+      },
+      {
+        "npcID": 270582,
+        "name": "Mon'ye",
+        "category": "transmog",
+        "faction": "Horde",
+        "areaID": 1637,
+        "uiMapID": 1454,
+        "worldMapID": 1,
+        "zone": "Orgrimmar",
+        "providerSpawnRecords": 1,
+        "roleSource": "https://www.wowhead.com/forever/npc=270582/monye"
+      }
+    ],
+    "excluded": [
+      {
+        "npcID": 273057,
+        "name": "Fyrenz Vishonar",
+        "reason": "No provider spawn or faction and no service title in the Forever primary record.",
+        "source": "https://www.wowhead.com/forever/npc=273057/fyrenz-vishonar"
+      }
+    ],
+    "flagPolicy": "Do not classify 0x10000000 alone as transmog. Installed Forever rows 1745, 10181 and 14182 carry it without this service role.",
+    "remainingGaps": [
+      "The readable local creature cache contains none of the three identities. No current-build live spawn observation or server hotfix location proof was available.",
+      "Provider coordinates are not certified for build 70338. Native rendering, physical reachability and live service interactions remain unobserved.",
+      "No complete Forever world coverage is claimed. The provider remains required for NPC positions."
+    ]
+  }
 }

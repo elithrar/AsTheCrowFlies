@@ -1,5 +1,13 @@
 # Sequential review record
 
+## Transmogrifier adversarial review, 2026-10-12
+
+Reviewed the full PR #7 diff against `ef8a91f`, including the role registry, provider loading and classification, saved profiles, All/OR selection, semantic search tiers, route candidate eligibility, native menu/results strings, tests and provenance. The new user-facing labels are the plural filter name and singular service description. They use existing menu and result rendering, with internal aliases kept out of display copy. No copy defect required changing valid behavior.
+
+Fault injection reproduced two failures after an NPC-ID correction admitted a record with malformed optional metadata. A boolean service title crashed search concatenation, and a string waypoint value crashed indexing. Provider labels now require nonblank strings and waypoint inspection requires a table. The regression covers boolean, number, table and whitespace inputs through indexing, search and the result description. The three installed records retain the same names, factions and six positions after the fix. Follow-up source review and all 151 Lua scenarios pass, with no remaining actionable finding in the reviewed diff.
+
+The private audit passes all three checks for the pinned provider, six positions and exact-build map assignments. The documented placement limitation remains: readable client data does not establish current-build NPC spawns or physical reachability. Native rendering and live service interaction checks are still pending. No merge, version tag, release or installation is included in this review.
+
 ## v0.1.1 panel sizing, docking and layers, 2026-10-11
 
 PR #4 began at `e901b81db39f4c77f987316af259fa705601662c`, based on main `38af6fd`. Independent reviewers checked maintainability, XPIsland-style options, supported native API contracts, narrow layouts and adversarial gesture/state transitions. The default width is now 240 (79% of 304), with a one-time migration that preserves custom sizes. The grip is available in all unlocked views, the edge tab remembers a normalized vertical position, and High layering defaults to the same level used by XPIsland with lower layers available in options.

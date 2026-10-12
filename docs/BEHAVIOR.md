@@ -32,6 +32,12 @@ Drag the header to move the panel, or snap near either screen edge. Drag the col
 
 The bottom-right grip is available in every unlocked panel view. Width persists between 220 and 640 logical pixels; populated results also support height resizing, while idle, empty and compact navigation views retain their content-driven height. The panel and edge tab default to High frame layering at level 100; Low and Medium are available in settings. Options and menus remain above the panel. Settings also provide font, font size, scale, background/text colors, position lock, independent map/minimap markers, placement reset, route ordering and per-character named profiles. Navigation gold is fixed; legacy accent values remain preserved in saved profiles. Duplicate, switch, copy and reset preserve character discovery/timing; destructive profile operations have inline confirmation and cancel. `/atcf`, `/atcf options` and `/atcf opts` open settings idempotently; `/atcf show` and `/atcf hide` control panel visibility. Expressway is requested from installed SharedMedia, never bundled. Flight selection and movement remain manual.
 
+## Transmogrifier search
+
+Transmogrifiers is a native checkbox in the existing filter menu. It shares profile persistence, category OR selection and All reset with the other services. Search accepts transmog, transmogrifier, transmogrifiers, transmogrification and NPC names. Semantic service matches retain priority over incidental names during route comparison.
+
+The Forever service registry corrects missing provider roles for NPCs 270513, 270581 and 270582. Their positions, faction eligibility, phases and mobility still come from the read-only Forever QuestieDB API. Explicit provider service titles can identify additional transmogrifiers, including through raw English title fallback. The high NPC flag bit alone is not reliable role evidence in the installed Forever data. Missing positions or failed native map projection produce no destination. These records retain provider confidence and the existing bearing-only route and interaction arrival behavior.
+
 ## Reproducing MONOLITH data
 
 The exact-build workflow reads installed data through task-2's existing read-only extractor and pinned schemas. It does not alter task-2 or the game. Raw data and generated taxi payload remain under ignored `.work/`.

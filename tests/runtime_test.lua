@@ -580,7 +580,7 @@ test('minimal idle expands on typing and clear Escape Stop cancel queued searche
     U.to:ClearFocus();C.query='';C:Refresh()
 end)
 test('native filter nested checkboxes support OR class defaults reset and repeated changes',function()
-    C:BindFilters();C:Filter('all');flushSearch();local menu=filterDescription();assert(menu.scroll==280 and #menu.children==8 and menu.children[1].selected())
+    C:BindFilters();C:Filter('all');flushSearch();local menu=filterDescription();assert(menu.scroll==280 and #menu.children==9 and menu.children[1].selected())
     local d=U.filterButton;local icon=d.icons.filter.texture
     assert(d.kind=='DropdownButton' and icon:GetAtlas()=='gamepad-hud-icon-filter' and icon.desaturated)
     assert(icon:GetWidth()==18 and icon:GetHeight()==18 and d:GetWidth()==24 and d:GetHeight()==28 and not d.text:IsShown())
@@ -595,6 +595,8 @@ test('native filter nested checkboxes support OR class defaults reset and repeat
     classes.children[1].callback();flushSearch();assert(not next(C.filter.classes) and classes.children[1].selected())
     classes.children[2].callback();flushSearch();assert(C.filter.classes.WARRIOR)
     local professions=menu.children[4];professions.children[2].callback();flushSearch();assert(C.filter.professions.Alchemy and C.filter.categories.profession)
+    local transmog=menu.children[6];assert(transmog.label=='Transmogrifiers' and #transmog.children==0)
+    transmog.callback();flushSearch();assert(C.filter.categories.transmog and transmog.selected() and C.profile.searchFilters.categories.transmog)
     assert(icon.color[1]==1 and icon.color[2]==.82 and icon.color[3]==0)
     assert(d.text.textColor[1]==1 and d.text.textColor[2]==.82 and d.text.textColor[3]==0)
     for _=1,4 do menu.children[2].callback();flushSearch() end;assert(C.filter.categories.auction)
@@ -602,6 +604,7 @@ test('native filter nested checkboxes support OR class defaults reset and repeat
     U.to:SetFocus();U.filterButton.scripts.OnMouseDown();assert(not U.to:HasFocus())
     U.filterButton.menuOpen=true;C:Back();assert(not U.filterButton:IsMenuOpen())
     menu.children[1].callback();flushSearch();assert(not N.Model.HasFilter(C.filter) and not next(C.filter.classes) and not next(C.filter.professions))
+    assert(not transmog.selected() and not C.profile.searchFilters.categories.transmog)
     assert(icon.color[1]==.75 and icon.color[2]==.75 and icon.color[3]==.75)
     assert(d.text.textColor[1]==.75 and d.text.textColor[2]==.75 and d.text.textColor[3]==.75);C:Stop()
 end)
@@ -1693,5 +1696,91 @@ test('taxi reconciliation replaces normalized coordinates together with their ma
     C:TaxiOpened();assert(node.uiMapID==player.uiMapID and node.mx==nil and node.my==nil,'a new map cannot retain the old map coordinate pair')
     assert(not A.Project(node,player.uiMapID),'unavailable projection hides the pin instead of fabricating a stale-map position')
     A.Taxi=taxi;C_Map.GetMapPosFromWorldPos=inverse;C_Map.GetMapInfo=info;cleanup()
+end)
+test('Forever service corrections classify missing titles without importing Retail flag semantics',function()
+    local P=N.Providers
+    for _,id in ipairs({270513,270581,270582}) do
+        local category,role,class,profession=P.Classify(nil,nil,nil,nil,id)
+        assert(category=='transmog' and role=='Transmogrifier' and not class and not profession)
+    end
+    assert(P.Classify('  Transmogrifier  ',0)=='transmog')
+    assert(not P.Classify(nil,0,nil,nil,273057),'the locationless same-name NPC is not an alias')
+    assert(not P.Classify('Banshee Queen',268435459),'the high flag bit is not reliable Forever service evidence')
+    assert(P.Classify('Banshee Queen',268435459,{1})=='quest')
+    assert(P.Classify('Transmogrification Enthusiast',0,{1})=='quest','incidental titles do not establish a service')
+end)
+
+test('transmogrifier provider records retain maps faction phase source and distinct spawns',function()
+    local previous=LibQuestieDB;local P=N.Providers
+    -- Synthetic positions exercise plumbing without bundling provider coordinates.
+    local records={
+        [270581]={name='Fyrenz Vishonar',friendlyToFaction='A',spawns={[1519]={{30,40},{35,40,7}}}},
+        [270513]={name='Spellweaver Thaldris',friendlyToFaction='A',spawns={[36]={{20,60}}}},
+        [270582]={name="Mon'ye",subName='',friendlyToFaction='H',spawns={[1637]={{40,50}}}},
+        [273057]={name='Fyrenz Vishonar'},
+        [80]={name='Localized service',subName='Localized title',friendlyToFaction='AH',questStarts={1},spawns={[36]={{25,60}}},waypoints={[36]={{25,60}}}},
+        [81]={name='Hostile service',subName='Transmogrifier',spawns={[36]={{30,60}}}},
+        [82]={name='Missing positions',subName='Transmogrifier',friendlyToFaction='AH'},
+        [83]={name='Invalid positions',subName='Transmogrifier',friendlyToFaction='AH',spawns={[999]={{50,50}},[36]={{'bad',60},{-1,60},{25,101}}}},
+    }
+    LibQuestieDB={flavor={name='Forever'},RequireContract=function(v) return v==3 end,
+        Support={Get=function() return {private={areaIdToUiMapId='return { [36]=1416, [1519]=1453, [1637]=1454 }'}} end},
+        Npc={GetAllIds=function() return {270581,270513,270582,273057,80,81,82,83} end,
+            Get=function(id,key) return records[id][key] end,GetRaw=function(id,key) if id==80 and key=='subName' then return 'Transmogrifier' end end}}
+    local state=assert(P.Connect());while not P.Step(state,1) do end
+    assert(#state.items==6 and state.counts.unmapped==4)
+    local first,second,thaldris,monye,localized,hostile=unpack(state.items)
+    assert(first.npcID==270581 and first.id~=second.id and first.uiMapID==1453 and first.mx==.3 and first.my==.4)
+    assert(first.role=='Transmogrifier' and first.confidence=='provider' and first.source=='QuestieDB Forever')
+    assert(second.phase==7 and not second.floor and thaldris.uiMapID==1416)
+    assert(monye.uiMapID==1454 and monye.faction=='Horde' and monye.role=='Transmogrifier')
+    assert(localized.categories.transmog and localized.categories.quest and localized.mobile and localized.faction=='Neutral')
+    assert(not hostile.available and #N.Model.Search(state.items,'transmog',{},{faction='Alliance'})==4)
+    assert(#N.Model.Search(state.items,'transmogrifier',{},{faction='Horde'})==2)
+    assert(N.Model.Search(state.items,"Mon'ye",{},{faction='Horde'})[1]==monye)
+    assert(P.Step(state,30) and #state.items==6,'a completed indexing pass cannot duplicate spawns')
+    assert(records[270581].subName==nil and records[270582].subName=='','provider records stay read-only')
+    LibQuestieDB=previous
+end)
+
+test('corrected service identities tolerate malformed optional provider labels and waypoints',function()
+    local previous=LibQuestieDB;local P=N.Providers
+    for _,malformed in ipairs({true,false,17,{},'   '}) do
+        local record={name=malformed,subName=malformed,waypoints=malformed,friendlyToFaction='A',spawns={[1519]={{30,40}}}}
+        LibQuestieDB={flavor={name='Forever'},RequireContract=function(v) return v==3 end,
+            Support={Get=function() return {private={areaIdToUiMapId='return { [1519]=1453 }'}} end},
+            Npc={GetAllIds=function() return {270581} end,Get=function(_,key) return record[key] end,GetRaw=function() return malformed end}}
+        local state=assert(P.Connect());assert(P.Step(state,2) and #state.items==1)
+        local point=state.items[1];assert(point.name=='270581' and point.role=='Transmogrifier' and not point.mobile)
+        assert(N.Model.Search(state.items,'transmog',{},{faction='Alliance'})[1]==point)
+        assert(U:DestinationDetail(point):find('Transmogrifier',1,true))
+    end
+    LibQuestieDB=previous
+end)
+
+test('transmog results compare route select Go and interaction arrival through the current UI',function()
+    local goal,start,cleanup=arrivalFixture();local profile=N.Model.Copy(C.profile);local profiles=C.profiles
+    goal.npcID=270581;goal.name='Fyrenz Vishonar';goal.category='transmog';goal.role='Transmogrifier';goal.zone='Stormwind City';goal.faction='Alliance'
+    local incidental=N.Model.Copy(goal);incidental.id='incidental-transmog';incidental.npcID=99;incidental.name='Transmog Collector';incidental.category='quest';incidental.role='Quest NPC';incidental.x=goal.x-399
+    local horde=N.Model.Copy(goal);horde.id='wrong-faction';horde.npcID=270582;horde.name="Mon'ye";horde.faction='Horde'
+    C.destinations={incidental,horde,goal};C:BindFilters();C:Filter('all');flushSearch()
+    C:Search('transmog');flushSearch();assert(C.matches[1]==goal and #C.matches==2)
+    C:Plan();assert(#C.results==1 and C.results[1].destination==goal and C.results[1].legs[1].quality=='bearing')
+    for _,width in ipairs({220,240,640}) do for _,size in ipairs({10,18}) do for _,scale in ipairs({.75,1.5}) do
+        C.profile.width=width;C.profile.fontSize=size;C.profile.scale=scale;C:ApplyProfile()
+        assert(U.destinationName:GetText()=='Fyrenz Vishonar' and U.destinationDetail:GetText():find('Transmogrifier',1,true))
+        assert(U.destinationName:GetWidth()<=width and U.go.text:GetUnboundedStringWidth()<=U.go:GetWidth())
+    end end end
+    C:Go();local route=C.nav.route;assert(route and route.destination.npcID==270581)
+    C.query='';C:Filter('categories','transmog');flushSearch();assert(#C.matches==1 and C.matches[1]==goal and C.nav.route==route)
+    local saved=N.Settings.Profiles(nil,C.profile);local reloaded=N.Settings.Profiles(saved)
+    assert(reloaded.profiles.Default.searchFilters.categories.transmog,'reload retains the new checkbox')
+    C:Filter('categories','quest');flushSearch();assert(#C.matches==2)
+    C:Filter('all');flushSearch();assert(#C.matches==2 and not N.Model.HasFilter(C.filter))
+    C:Stop();C.destination=nil;C:Filter('categories','transmog');flushSearch();U.go.scripts.OnClick()
+    assert(#C.results==1 and C.results[1].destination==goal and not C.destination,'Compare matches plans the service category')
+    C:Go();UnitGUID=function(unit) assert(unit=='npc');return 'Creature-0-1234-0-0-270581-000000ABCD' end
+    C.events.scripts.OnEvent(nil,'GOSSIP_SHOW');assert(not C.nav.route and C.arrivalUntil)
+    C.profile=profile;C.profiles=profiles;cleanup();C:BindFilters();C:ApplyProfile()
 end)
 print('PASS runtime scenarios: '..count..'; frames allocated='..#frames)
