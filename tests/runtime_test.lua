@@ -1743,6 +1743,21 @@ test('transmogrifier provider records retain maps faction phase source and disti
     LibQuestieDB=previous
 end)
 
+test('corrected service identities tolerate malformed optional provider labels and waypoints',function()
+    local previous=LibQuestieDB;local P=N.Providers
+    for _,malformed in ipairs({true,false,17,{},'   '}) do
+        local record={name=malformed,subName=malformed,waypoints=malformed,friendlyToFaction='A',spawns={[1519]={{30,40}}}}
+        LibQuestieDB={flavor={name='Forever'},RequireContract=function(v) return v==3 end,
+            Support={Get=function() return {private={areaIdToUiMapId='return { [1519]=1453 }'}} end},
+            Npc={GetAllIds=function() return {270581} end,Get=function(_,key) return record[key] end,GetRaw=function() return malformed end}}
+        local state=assert(P.Connect());assert(P.Step(state,2) and #state.items==1)
+        local point=state.items[1];assert(point.name=='270581' and point.role=='Transmogrifier' and not point.mobile)
+        assert(N.Model.Search(state.items,'transmog',{},{faction='Alliance'})[1]==point)
+        assert(U:DestinationDetail(point):find('Transmogrifier',1,true))
+    end
+    LibQuestieDB=previous
+end)
+
 test('transmog results compare route select Go and interaction arrival through the current UI',function()
     local goal,start,cleanup=arrivalFixture();local profile=N.Model.Copy(C.profile);local profiles=C.profiles
     goal.npcID=270581;goal.name='Fyrenz Vishonar';goal.category='transmog';goal.role='Transmogrifier';goal.zone='Stormwind City';goal.faction='Alliance'

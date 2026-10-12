@@ -4,6 +4,7 @@ local professions={"Alchemy","Blacksmithing","Enchanting","Engineering","Herbali
 local aliases={Alchemy={"alchemist","alchemy"},Blacksmithing={"blacksmith","armorsmith","weaponsmith","armor crafter","weapon crafter"},Enchanting={"enchant"},Engineering={"engineer"},Herbalism={"herbal"},Leatherworking={"leatherwork"},Mining={"mining","miner"},Skinning={"skinning","skinner"},Tailoring={"tailor"},Cooking={"cooking","cook"},["First Aid"]={"first aid","physician","trauma surgeon"},Fishing={"fishing","fisher"}}
 P.classes=classes;P.professions=professions
 local function has(flags,mask) return M.Number(flags) and math.floor(flags/mask)%2==1 end
+local function label(value) if type(value)=="string" and value:find("%S") then return value end end
 -- QuestieDB's support contract carries this numeric map as serialized text.
 -- Parse only [integer]=integer pairs; never evaluate provider data as Lua.
 function P.MapRegistry(value)
@@ -35,6 +36,7 @@ function P.Connect()
     return {lib=lib,zone=registry,ids=A.Call(lib.Npc.GetAllIds),cursor=1,items={},counts={npcs=0,spawns=0,unmapped=0,unknownTrainers=0,phase=0},classMap={}}
 end
 function P.Classify(title,flags,starts,ends,npcID)
+    title=label(title)
     local lower=M.Fold(title);local category,role,class,profession
     local service=N.Data and N.Data.npcServices and N.Data.npcServices[npcID]
     -- The installed Forever provider's 0x10000000 flag also marks unrelated NPCs.
@@ -58,17 +60,17 @@ function P.Step(s,budget)
         local id=s.ids[s.cursor];if not id then return true end;s.cursor=s.cursor+1
         local npc=s.lib.Npc;local flags=A.Call(npc.Get,id,"npcFlags")
         local starts,ends=A.Call(npc.Get,id,"questStarts"),A.Call(npc.Get,id,"questEnds")
-        local title=A.Call(npc.Get,id,"subName");local raw=A.Call(npc.GetRaw,id,"subName")
+        local title=label(A.Call(npc.Get,id,"subName"));local raw=label(A.Call(npc.GetRaw,id,"subName"))
         local category,role,class,profession=P.Classify(title,flags,starts,ends,id)
         if category~="transmog" and not class and not profession and raw then
             local rc,rr,rclass,rprofession=P.Classify(raw,flags,starts,ends)
             if rc=="transmog" or rclass or rprofession then category,role,class,profession=rc,rr,rclass,rprofession end
         end
         if category then
-            local name=A.Call(npc.Get,id,"name");local spawns=A.Call(npc.Get,id,"spawns")
+            local name=label(A.Call(npc.Get,id,"name"));local spawns=A.Call(npc.Get,id,"spawns")
             local friendly=A.Call(npc.Get,id,"friendlyToFaction")
             local faction=friendly=="A" and "Alliance" or friendly=="H" and "Horde" or friendly=="AH" and "Neutral" or nil
-            local mobile=next(A.Call(npc.Get,id,"waypoints") or {})~=nil
+            local waypoints=A.Call(npc.Get,id,"waypoints");local mobile=type(waypoints)=="table" and next(waypoints)~=nil
             s.counts.npcs=s.counts.npcs+1
             if category=="trainer" then s.counts.unknownTrainers=s.counts.unknownTrainers+1 end
             for area,positions in pairs(type(spawns)=="table" and spawns or {}) do
@@ -77,7 +79,7 @@ function P.Step(s,budget)
                     local p=map and type(xyz)=="table" and M.Number(xyz[1]) and M.Number(xyz[2]) and A.FromMap(map,xyz[1]/100,xyz[2]/100)
                     if p then
                         p.id="qdb:"..id..":"..area..":"..index;p.npcID=id;p.name=name or tostring(id)
-                        p.category=category;p.class=class;p.profession=profession;p.role=title and title~="" and title or role;p.faction=faction;p.available=faction~=nil
+                        p.category=category;p.class=class;p.profession=profession;p.role=title or role;p.faction=faction;p.available=faction~=nil
                         p.categories={};p.categories[category]=true
                         if type(starts)=="table" and next(starts) or type(ends)=="table" and next(ends) then p.categories.quest=true end
                         p.questStarts=type(starts)=="table" and #starts or 0;p.questEnds=type(ends)=="table" and #ends or 0
