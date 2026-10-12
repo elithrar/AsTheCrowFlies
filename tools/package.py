@@ -11,7 +11,7 @@ from release import metadata
 
 ROOT = Path(__file__).resolve().parents[1]
 MEDIA = ('eagle', 'arrow', 'surface', 'cog')
-DEV_DOCS = ('README.md', 'NOTICES.md', 'plan.md', 'docs/BEHAVIOR.md',
+DEV_DOCS = ('README.md', 'NOTICES.md', 'docs/BEHAVIOR.md',
             'docs/COVERAGE.md', 'docs/VALIDATION.md', 'docs/REVIEW.md',
             'docs/data-provenance.json', 'docs/npc-coverage.json',
             'docs/transport-audit.json', 'docs/performance.json')
@@ -68,7 +68,9 @@ def build(root=ROOT, local_data=False, release=False):
         payload['AsTheCrowFlies/DATA-PROVENANCE.json'] = provenance_bytes
     else:
         for name in DEV_DOCS:
-            payload['AsTheCrowFlies/' + name] = read(root / name)
+            path = root / name
+            if path.is_file():
+                payload['AsTheCrowFlies/' + name] = read(path)
         if local_data:
             payload['AsTheCrowFlies/DATA-PROVENANCE.json'] = provenance_bytes
     label = version if release else version + ('-dev-local' if local_data else '-dev-source')

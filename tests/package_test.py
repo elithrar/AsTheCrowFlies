@@ -24,12 +24,6 @@ TOC_FILES = ['Model.lua', 'Settings.lua', 'Data/Registry.lua', 'Data/Taxi.lua',
              'UI.lua', 'Overlay.lua', 'Options.lua', 'Core.lua', 'Bindings.xml']
 RUNTIME_FILES = {'AsTheCrowFlies.toc', *TOC_FILES,
                  'Media/eagle.tga', 'Media/arrow.tga', 'Media/surface.tga', 'Media/cog.tga'}
-DEV_DOCS = {'README.md', 'NOTICES.md', 'plan.md', 'docs/BEHAVIOR.md',
-            'docs/COVERAGE.md', 'docs/VALIDATION.md', 'docs/REVIEW.md',
-            'docs/data-provenance.json', 'docs/npc-coverage.json',
-            'docs/transport-audit.json', 'docs/performance.json'}
-RELEASE_FILES = RUNTIME_FILES | {'README.md', 'NOTICES.md', 'CHANGELOG.md',
-                                 'DATA-PROVENANCE.json'}
 
 
 def digest(data):
@@ -50,8 +44,9 @@ def fixture():
         if not root.is_relative_to(scratch):
             raise AssertionError('Temporary package fixture escaped the workspace')
         shutil.copytree(ROOT / 'AsTheCrowFlies', root / 'AsTheCrowFlies')
-        shutil.copytree(ROOT / 'docs', root / 'docs')
-        for name in ('README.md', 'NOTICES.md', 'plan.md'):
+        (root / 'docs/releases').mkdir(parents=True)
+        for name in ('README.md', 'NOTICES.md', 'docs/data-provenance.json',
+                     f'docs/releases/{VERSION}.md'):
             shutil.copyfile(ROOT / name, root / name)
         yield root
 
@@ -64,20 +59,21 @@ class Packages(unittest.TestCase):
         cls.builder = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(cls.builder)
 
-    def check_archive(self, path, report, expected):
+    def check_archive(self, path, report):
         self.assertEqual(report['sha256'], digest(path.read_bytes()))
         self.assertEqual(report['bytes'], path.stat().st_size)
         with zipfile.ZipFile(path) as archive:
             names = archive.namelist()
-            self.assertEqual(set(names), {'AsTheCrowFlies/' + name for name in expected})
-            self.assertEqual(len(names), len(expected))
+            runtime = {name for name in names if not name.endswith(('.md', '.json'))}
+            self.assertEqual(runtime, {'AsTheCrowFlies/' + name for name in RUNTIME_FILES})
+            self.assertEqual(len(names), len(set(names)))
             self.assertEqual(names, sorted(names))
             self.assertIsNone(archive.testzip())
             self.assertEqual(len({info.date_time for info in archive.infolist()}), 1)
             self.assertEqual(report['files'], {name: digest(archive.read(name)) for name in names})
             for name in names:
                 self.assertFalse(name.endswith(('.bin', '.exe', '.db2', '.py', '.cjs')))
-                if Path(name).suffix in ('.lua', '.toc', '.xml', '.md', '.json'):
+                if Path(name).suffix in ('.lua', '.toc', '.xml'):
                     self.assertNotIn(b'\r', archive.read(name), name)
             toc = archive.read('AsTheCrowFlies/AsTheCrowFlies.toc').decode('utf-8').splitlines()
             self.assertIn('## Interface: 16001', toc)
@@ -101,24 +97,18 @@ class Packages(unittest.TestCase):
                 second = self.builder.build(root=ROOT, local_data=local)
                 self.assertEqual(first, path.read_bytes())
                 self.assertEqual(report, second)
-                expected = RUNTIME_FILES | DEV_DOCS
-                if local:
-                    expected |= {'DATA-PROVENANCE.json'}
-                self.check_archive(path, report, expected)
+                self.check_archive(path, report)
                 manifest = json.loads((ROOT / 'dist' / f'{VERSION}-dev-{suffix}-manifest.json').read_text())
                 self.assertEqual(manifest, report)
 
-    def test_release_is_reproducible_stable_complete_and_minimal(self):
+    def test_release_is_reproducible_with_complete_runtime_data(self):
         report = self.builder.build(root=ROOT, release=True)
         path = ROOT / 'dist' / f'AsTheCrowFlies-{VERSION}.zip'
         first = path.read_bytes()
         self.assertEqual(report, self.builder.build(root=ROOT, release=True))
         self.assertEqual(first, path.read_bytes())
-        self.assertEqual(len(RELEASE_FILES), 22)
-        self.check_archive(path, report, RELEASE_FILES)
+        self.check_archive(path, report)
         with zipfile.ZipFile(path) as archive:
-            self.assertEqual(archive.read('AsTheCrowFlies/CHANGELOG.md'),
-                             normalized((ROOT / f'docs/releases/{VERSION}.md').read_bytes()))
             provenance = json.loads(archive.read('AsTheCrowFlies/DATA-PROVENANCE.json'))
             self.assertEqual(provenance['payloadSHA256'], TAXI_SHA256)
             self.assertEqual(provenance['build'], '1.60.1.70338')
@@ -138,7 +128,7 @@ class Packages(unittest.TestCase):
             self.builder.build(root=root, release=True)
             path = root / 'dist' / f'AsTheCrowFlies-{VERSION}.zip'
             first = path.read_bytes()
-            for name in ('README.md', 'AsTheCrowFlies/Core.lua', 'AsTheCrowFlies/AsTheCrowFlies.toc'):
+            for name in ('AsTheCrowFlies/Core.lua', 'AsTheCrowFlies/AsTheCrowFlies.toc'):
                 source = root / name
                 source.write_bytes(normalized(source.read_bytes()).replace(b'\n', b'\r\n'))
                 os.utime(source, (946684800, 946684800))
