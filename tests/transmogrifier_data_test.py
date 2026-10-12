@@ -100,24 +100,30 @@ class TransmogrifierDataTests(unittest.TestCase):
         self.lua.globals().records = self.lua.table_from(records, recursive=True)
         self.lua.globals().ids = self.lua.table_from(ids)
         self.lua.globals().zones = self.lua.table_from(zones)
+        assignments = json.loads((FIXTURES / 'tables/UiMapAssignment.json').read_text(encoding='utf-8'))['rows']
+        self.lua.globals().mapAssignments = self.lua.table_from(
+            {row['UiMapID']: row for row in assignments if row['UiMapID'] in zones.values()}, recursive=True)
         self.lua.execute('''
             local N=...
             N.Adapter.Call=function(fn,...) if type(fn)=='function' then return fn(...) end end
-            -- Synthetic world axes only exercise indexing and normalized map coordinates.
-            N.Adapter.FromMap=function(map,x,y) return {map=0,uiMapID=map,x=x*1000,y=y*1000,mx=x,my=y} end
+            -- Matching client assignment extents exercise the real five-yard boundary offline.
+            N.Adapter.FromMap=function(map,x,y)
+                local a=mapAssignments[map];local r=a.Region
+                return {map=a.MapID,uiMapID=map,x=r[4]-y*(r[4]-r[1]),y=r[5]-x*(r[5]-r[2]),mx=x,my=y}
+            end
             LibQuestieDB={flavor={name='Forever'},RequireContract=function(v) return v==3 end,
                 Support={Get=function() return {private={areaIdToUiMapId=zones}} end},
                 Npc={GetAllIds=function() return ids end,Get=function(id,key) return records[id][key] end,GetRaw=function() end}}
             local state=assert(N.Providers.Connect())
             while not N.Providers.Step(state,1) do end
-            assert(#state.items==6 and state.counts.unmapped==0)
-            assert(#N.Model.Search(state.items,'transmog',{},{faction='Alliance'})==5)
+            assert(#state.items==3 and state.counts.spawns==6 and state.counts.unmapped==0)
+            assert(#N.Model.Search(state.items,'transmog',{},{faction='Alliance'})==2)
             assert(#N.Model.Search(state.items,'transmogrifier',{},{faction='Horde'})==1)
             for _,id in ipairs(ids) do
                 local row=records[id]
                 local faction=row.friendlyToFaction=='H' and 'Horde' or 'Alliance'
                 local matches=N.Model.Search(state.items,row.name,{categories={transmog=true}},{faction=faction})
-                assert(#matches>0 and matches[1].npcID==id)
+                assert(#matches==1 and matches[1].npcID==id)
             end
         ''', self.namespace)
         for npc_id in (1745, 10181, 14182):
