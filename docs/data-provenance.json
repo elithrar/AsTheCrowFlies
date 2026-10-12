@@ -221,7 +221,7 @@
     "providerCommit": "e0a6eaa86f181ac99262e34126bcd2ed1a1712d6",
     "providerTocSHA256": "d2ae0f70de2d3296ef50388ae5fdf3640975654895056bbd2325882806f4adcb",
     "providerMapRegistryBuild": "1.60.1.69893",
-    "coordinatePolicy": "Preserve every provider spawn and runtime correction. Require valid native map projection. Retain provider confidence, faction, mobility and phase metadata. No bundled NPC coordinates.",
+    "coordinatePolicy": "Read provider spawns and runtime corrections without mutation. Require valid native map projection. Consolidate stationary samples only within one NPC, source area, world/UI map, floor, faction and phase, with a maximum five-yard group diameter. Keep the first original position and ID. Preserve distant and moving records, provider confidence and eligibility metadata. No bundled NPC coordinates.",
     "mapEvidence": "The three AreaID to UiMapID mappings agree with the readable 70338 UiMap and UiMapAssignment tables and their pinned source hashes.",
     "officialSource": "https://news.blizzard.com/en-us/article/24303313/world-of-warcraft-forever-deep-dive-panel-recap",
     "entries": [

@@ -1743,6 +1743,71 @@ test('transmogrifier provider records retain maps faction phase source and disti
     LibQuestieDB=previous
 end)
 
+test('nearby stationary transmogrifier samples produce one search destination and retain route alternatives',function()
+    local previous=LibQuestieDB;local P,M,R=N.Providers,N.Model,N.Routes
+    local records={
+        [270581]={name='Fyrenz Vishonar',friendlyToFaction='A',spawns={[1519]={{30,40},{30.02,40.02},{30.04,40.01}}}},
+        [270513]={name='Spellweaver Thaldris',friendlyToFaction='A',spawns={[36]={{20,60},{20,60.2}}}},
+        [270582]={name="Mon'ye",friendlyToFaction='H',spawns={[1637]={{40,50}}}},
+    }
+    LibQuestieDB={flavor={name='Forever'},RequireContract=function(v) return v==3 end,
+        Support={Get=function() return {private={areaIdToUiMapId={[1519]=1453,[36]=1416,[1637]=1454}}} end},
+        Npc={GetAllIds=function() return {270581,270513,270582} end,Get=function(id,key) return records[id][key] end}}
+    local state=assert(P.Connect());while not P.Step(state,1) do end
+    assert(#state.items==3 and state.counts.spawns==6,'raw samples remain counted without duplicate destinations')
+    assert(state.items[1].id=='qdb:270581:1519:1' and state.items[1].mx==.3 and state.items[1].my==.4)
+    assert(#records[270581].spawns[1519]==3 and #records[270513].spawns[36]==2,'provider records remain untouched')
+    local ctx={faction='Alliance',speed=7,flightPrior=32,known={}}
+    for _,query in ipairs({'transmog','transmogrifier','transmogrifiers','transmogrification'}) do
+        assert(#M.Search(state.items,query,{},ctx)==2)
+        assert(#M.Search(state.items,query,{categories={transmog=true}},ctx)==2)
+    end
+    local fyrenz=M.Search(state.items,'Fyrenz Vishonar',{},ctx);assert(#fyrenz==1)
+    assert(#M.Search(state.items,'Spellweaver Thaldris',{},ctx)==1)
+    assert(#M.Search(state.items,'',{categories={transmog=true}},ctx)==2)
+    assert(#M.Search(state.items,'transmog',{},{faction='Horde'})==1)
+    local origin={map=0,x=0,y=0};local data={nodes={},edges={}}
+    local routes=R.Plan(origin,M.Search(state.items,'transmog',{},ctx),data,ctx)
+    assert(#routes==2 and routes[1].destination.npcID~=routes[2].destination.npcID)
+    local finish=M.Copy(fyrenz[1]);finish.x=finish.x-10
+    data.nodes={[1]=origin,[2]=finish};data.edges={{id='test-flight',from=1,to=2,start=origin,finish=finish,mode='flight',distance=1000}}
+    ctx.known={[1]={state='known'},[2]={state='known'}}
+    routes=R.Plan(origin,fyrenz,data,ctx)
+    assert(#routes==2 and M.RouteMode(routes[1])~=M.RouteMode(routes[2]),'real walk and flight choices survive consolidation')
+    assert(U:SharedDestination(routes)==fyrenz[1])
+    assert(P.Step(state,30) and #state.items==3,'repeated indexing does not restore discarded samples')
+    LibQuestieDB=previous
+end)
+
+test('spawn consolidation preserves distant identities phases floors maps and mobile NPCs',function()
+    local previous,fromMap=LibQuestieDB,A.FromMap;local P=N.Providers
+    -- World-yard fixture isolates the five-yard boundary without map scaling.
+    A.FromMap=function(map,x,y) return {map=map==3 and 1 or 0,uiMapID=map,x=x*100,y=y*100,floor=y>.5 and 2 or 1} end
+    local records={
+        [270581]={name='Same name',friendlyToFaction='A',spawns={
+            [1]={{20,40},{24,40},{16,40},{20,40,7},{20,40,8},{20,60},{25.01,40}},
+            [2]={{20,40}},[3]={{20,40}},[4]={{20,40}},
+        }},
+        [270513]={name='Same name',friendlyToFaction='A',spawns={[1]={{20,40}}}},
+        [270582]={name='Same name',friendlyToFaction='H',spawns={[1]={{20,40}}}},
+        [80]={name='Mobile',subName='Transmogrifier',friendlyToFaction='AH',spawns={[1]={{20,40},{20.01,40}}},waypoints={[1]={{20,40}}}},
+        [81]={name='Different floor',subName='Transmogrifier',friendlyToFaction='AH',spawns={[1]={{20,49.9},{20,50.1}}}},
+    }
+    LibQuestieDB={flavor={name='Forever'},RequireContract=function(v) return v==3 end,
+        Support={Get=function() return {private={areaIdToUiMapId={[1]=1,[2]=2,[3]=3,[4]=1}}} end},
+        Npc={GetAllIds=function() return {270581,270513,270582,80,81} end,Get=function(id,key) return records[id][key] end}}
+    local state=assert(P.Connect());while not P.Step(state,1) do end
+    local kept={};for _,p in ipairs(state.items) do kept[p.id]=p end
+    assert(#state.items==15 and state.counts.spawns==16)
+    assert(kept['qdb:270581:1:1'] and not kept['qdb:270581:1:2'] and kept['qdb:270581:1:3'],'cluster diameter cannot grow through nearby chains')
+    for _,index in ipairs({4,5,6,7}) do assert(kept['qdb:270581:1:'..index]) end
+    for _,area in ipairs({2,3,4}) do assert(kept['qdb:270581:'..area..':1']) end
+    assert(kept['qdb:270513:1:1'] and kept['qdb:270582:1:1'])
+    assert(kept['qdb:80:1:1'].mobile and kept['qdb:80:1:2'].mobile)
+    assert(kept['qdb:81:1:1'].floor~=kept['qdb:81:1:2'].floor)
+    LibQuestieDB=previous;A.FromMap=fromMap
+end)
+
 test('corrected service identities tolerate malformed optional provider labels and waypoints',function()
     local previous=LibQuestieDB;local P=N.Providers
     for _,malformed in ipairs({true,false,17,{},'   '}) do

@@ -53,6 +53,26 @@ function P.Classify(title,flags,starts,ends,npcID)
     end
     return category,role,class,profession
 end
+-- Nearby stationary samples of one NPC are one destination. Compare every
+-- member so a chain of nearby samples cannot swallow a genuinely distant spawn.
+-- Keep the first real position and ID, never an averaged or invented coordinate.
+local function appendSpawn(items,groups,p)
+    if not p.mobile then
+        for _,group in ipairs(groups) do
+            local first=group[1]
+            if first.npcID==p.npcID and first.faction==p.faction and first.phase==p.phase
+                and first.map==p.map and first.uiMapID==p.uiMapID and first.floor==p.floor then
+                local nearby=true
+                for _,point in ipairs(group) do
+                    if (M.Distance(point,p) or math.huge)>5 then nearby=false;break end
+                end
+                if nearby then group[#group+1]=p;return end
+            end
+        end
+        groups[#groups+1]={p}
+    end
+    items[#items+1]=p
+end
 -- Called in bounded batches by Core; no provider scan in OnUpdate or per keystroke.
 function P.Step(s,budget)
     if type(s.ids)~="table" then return true end
@@ -74,7 +94,7 @@ function P.Step(s,budget)
             s.counts.npcs=s.counts.npcs+1
             if category=="trainer" then s.counts.unknownTrainers=s.counts.unknownTrainers+1 end
             for area,positions in pairs(type(spawns)=="table" and spawns or {}) do
-                local map=s.zone[area]
+                local map=s.zone[area];local groups={}
                 for index,xyz in ipairs(type(positions)=="table" and positions or {}) do
                     local p=map and type(xyz)=="table" and M.Number(xyz[1]) and M.Number(xyz[2]) and A.FromMap(map,xyz[1]/100,xyz[2]/100)
                     if p then
@@ -86,7 +106,7 @@ function P.Step(s,budget)
                         p.phase=xyz[3];p.mobile=mobile;p.confidence="provider";p.source="QuestieDB Forever"
                         local info=A.Call(C_Map and C_Map.GetMapInfo,map);p.zone=info and info.name or ("Map "..map)
                         if p.phase then s.counts.phase=s.counts.phase+1 end
-                        s.items[#s.items+1]=p;s.counts.spawns=s.counts.spawns+1
+                        appendSpawn(s.items,groups,p);s.counts.spawns=s.counts.spawns+1
                     else s.counts.unmapped=s.counts.unmapped+1 end
                 end
             end

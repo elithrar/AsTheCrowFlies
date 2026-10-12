@@ -38,6 +38,8 @@ Transmogrifiers is a native checkbox in the existing filter menu. It shares prof
 
 The Forever service registry corrects missing provider roles for NPCs 270513, 270581 and 270582. Their positions, faction eligibility, phases and mobility still come from the read-only Forever QuestieDB API. Explicit provider service titles can identify additional transmogrifiers, including through raw English title fallback. The high NPC flag bit alone is not reliable role evidence in the installed Forever data. Missing positions or failed native map projection produce no destination. These records retain provider confidence and the existing bearing-only route and interaction arrival behavior.
 
+Nearby stationary provider samples become one destination when their NPC identity, source area, world/UI map, floor, faction and phase agree and every pair is within five yards. The first original position and ID represent the group for both search and routing. Distant samples, different identities or contexts, and moving NPCs remain separate. Raw provider records stay unchanged. Fyrenz Vishonar and Spellweaver Thaldris each appear once in their eligible search results.
+
 ## Reproducing MONOLITH data
 
 The exact-build workflow reads installed data through task-2's existing read-only extractor and pinned schemas. It does not alter task-2 or the game. Raw data and generated taxi payload remain under ignored `.work/`.
