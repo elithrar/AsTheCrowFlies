@@ -70,7 +70,7 @@ def measure(path):
 
     lua = LuaRuntime(unpack_returned_tuples=True)
     namespace = lua.table(Adapter=lua.table())
-    for filename in ('Model.lua', 'Providers.lua'):
+    for filename in ('Model.lua', 'Data/Registry.lua', 'Providers.lua'):
         lua.execute((ROOT / 'AsTheCrowFlies' / filename).read_text(encoding='utf-8'), 'AsTheCrowFlies', namespace)
     classify = namespace.Providers.Classify
     categories, friendly_categories, spawn_counts = (collections.Counter() for _ in range(3))
@@ -89,7 +89,7 @@ def measure(path):
                 flags_count[name] += 1
         starts = lua.table(1) if row.get('p', 0) & 512 else None
         ends = lua.table(1) if row.get('p', 0) & 1024 else None
-        category, role, player_class, profession = classify(row.get(14), flags, starts, ends)
+        category, role, player_class, profession = classify(row.get(14), flags, starts, ends, int(key.split('-')[2]))
         if not category:
             continue
         categories[category] += 1
@@ -112,6 +112,7 @@ def measure(path):
         'providerCommit': metadata.get('X-BUILD-COMMIT'),
         'tocSHA256': hashlib.sha256(payload).hexdigest(),
         'classifierSHA256': hashlib.sha256((ROOT / 'AsTheCrowFlies/Providers.lua').read_bytes()).hexdigest(),
+        'serviceRegistrySHA256': hashlib.sha256((ROOT / 'AsTheCrowFlies/Data/Registry.lua').read_bytes()).hexdigest(),
         'npcScalarRows': total,
         'serviceFlags': flags_count,
         'classifiedNPCs': categories,

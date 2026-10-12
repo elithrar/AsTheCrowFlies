@@ -469,4 +469,32 @@ test('future settings and profile stores are protected from mutation',function()
     assert(futureProfile.width==304 and futureProfile.layoutVersion==1 and futureProfile.dockPosition==.8 and futureProfile.strata=='TOOLTIP')
     p.colors.accent[1]=0;assert(S.defaults.colors.accent[1]~=0)
 end)
+test('transmogrifier selection persists through profile reload copy and All reset',function()
+    local filters={categories={transmog=true,class=true,invalid=true},classes={MAGE=true},professions={}}
+    local profile=S.Load({searchFilters=filters});assert(profile.searchFilters.categories.transmog and not profile.searchFilters.categories.invalid)
+    local store=S.Profiles(nil,profile);assert(S.DuplicateProfile(store,'Transmog').searchFilters.categories.transmog)
+    S.SwitchProfile(store,'Default').searchFilters=S.Filters({})
+    local reloaded=S.Profiles(store);assert(not M.HasFilter(reloaded.profiles.Default.searchFilters))
+    assert(S.SwitchProfile(reloaded,'Transmog').searchFilters.categories.transmog)
+    local copied=S.CopyProfile(reloaded,'Default');assert(not M.HasFilter(copied.searchFilters))
+    assert(filters.categories.transmog and store.profiles.Transmog.searchFilters.categories.transmog)
+end)
+
+test('transmog aliases retain semantic priority exact names and faction eligibility',function()
+    local service={id='service',name='Fyrenz Vishonar',category='transmog',faction='Alliance',map=0,x=1000,y=0}
+    local incidental={id='incidental',name='Transmog Collector',category='quest',map=0,x=1,y=0}
+    local horde={id='horde',name="Mon'ye",category='transmog',faction='Horde',map=0,x=2,y=0}
+    local unknown={id='unknown',name='Unknown service',category='transmog',available=false,map=0,x=0,y=0}
+    local items={incidental,horde,unknown,service};local ctx={faction='Alliance'};local origin={map=0,x=0,y=0}
+    for _,query in ipairs({'transmog','transmogrifier','transmogrifiers','transmogrification','TRANSMOG','transmogrifer'}) do
+        local matches=M.Search(items,query,{},ctx,nil,origin);assert(matches[1]==service,query)
+    end
+    assert(M.Search(items,'Fyrenz Vishonar',{},ctx)[1]==service)
+    assert(M.Search(items,'vishonar',{},ctx)[1]==service)
+    assert(M.Search(items,'Transmog Collector',{},ctx)[1]==incidental)
+    assert(M.Search(items,"Mon'ye",{},{faction='Horde'})[1]==horde)
+    assert(#M.Search(items,'',{categories={transmog=true},classes={MAGE=true}},ctx)==1)
+    assert(#M.Search(items,'',{categories={transmog=true,quest=true},classes={MAGE=true}},ctx)==2)
+    assert(#M.Search(items,'',{categories={},classes={MAGE=true},professions={Alchemy=true}},ctx)==2)
+end)
 print('PASS model scenarios: '..count)

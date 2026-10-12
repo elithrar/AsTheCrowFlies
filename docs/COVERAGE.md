@@ -1,4 +1,4 @@
-# Coverage at 11 October 2026
+# Coverage at 12 October 2026
 
 ## Exact local client
 
@@ -33,13 +33,18 @@ QuestieDB 1.0.5, contract 3, Forever flavor, commit `e0a6eaa86f181ac99262e34126b
 | Profession trainers | 492 | 461 | 32 |
 | Auctioneer-flag NPCs | 30 | 28 | 2 |
 | Other trainers | 47 | 50 | 0 |
+| Transmogrifiers | 3 | 6 | 0 |
 | Additional quest NPCs | 1,613 | 2,088 | 9 |
 
 Service NPCs can additionally be searchable in the quest category. Coordinate counts can exceed identities because multiple recorded spawns remain distinct. Runtime provider corrections and valid native projection determine which records actually become pins. The installed `npcMeta.lua` explicitly defines the third spawn coordinate as an optional phase, not a floor; no floor identity is invented from that field.
 
 All 202 class-classified NPCs have spawn records. Seven service-flagged records lack spawns: five generic World profession trainers and two named Armor/Weapons Quartermasters with auctioneer flags. An installed-corrections audit supplied no missing positions. Another 27 title-only profession records without spawns have zero service flags, predominantly World/test/unused-style entries. They do not become invented pins. Hostile-to-both-factions provider NPCs are not offered as usable destinations. Phases, moving NPCs, faction context and quest giver/turn-in roles are retained. Current quest eligibility and profession trainable ranks are not inferred from flags or titles. The addon uses no remote NPC locator and makes no claim to contain every NPC in the current world.
 
-No QuestieDB payload is committed, packaged or exported by measurement. Player-recorded locations stay in per-character SavedVariables, capped at 500.
+The transmogrifier role corrections cover Fyrenz Vishonar (270581, Alliance, Stormwind City), Mon'ye (270582, Horde, Orgrimmar) and Spellweaver Thaldris (270513, Alliance, Alterac Mountains). Their Forever NPC pages identify the service and their installed provider records supply six distinct coordinates. The AreaID to UiMapID mappings 1519 to 1453, 1637 to 1454 and 36 to 1416 agree with the readable build 70338 map tables. The names, factions, coordinates and map projection remain provider inputs at runtime. The locationless Fyrenz record 273057 is excluded.
+
+These are verified Forever identities, not exact-build verified spawn positions. The local build 70338 creature cache contains none of these identities, and no live placement or server hotfix location proof was available. The provider map registry targets 69893. Current-build coordinates, physical reachability, complete city coverage and native UI behavior remain open checks. No Retail service locations or flag semantics were substituted. Sources and field-level limits are recorded under `npcServices` in [data-provenance.json](data-provenance.json).
+
+No QuestieDB coordinate payload is committed, packaged or exported by measurement. Player-recorded locations stay in per-character SavedVariables, capped at 500. NPC destination search, including these corrections, still requires the optional Forever provider.
 
 ## Presentation
 

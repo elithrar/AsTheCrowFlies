@@ -34,8 +34,12 @@ function P.Connect()
     for area,map in pairs(override or {}) do registry[area]=map end
     return {lib=lib,zone=registry,ids=A.Call(lib.Npc.GetAllIds),cursor=1,items={},counts={npcs=0,spawns=0,unmapped=0,unknownTrainers=0,phase=0},classMap={}}
 end
-function P.Classify(title,flags,starts,ends)
+function P.Classify(title,flags,starts,ends,npcID)
     local lower=M.Fold(title);local category,role,class,profession
+    local service=N.Data and N.Data.npcServices and N.Data.npcServices[npcID]
+    -- The installed Forever provider's 0x10000000 flag also marks unrelated NPCs.
+    -- Only a verified Forever identity or an explicit service title proves this role.
+    if service=="transmog" or lower:match("^%s*transmogrifier%s*$") then return "transmog","Transmogrifier",nil,nil end
     if has(flags,4096) then category="auction";role="Auction house"
     elseif has(flags,16) then
         category="trainer";role=title or "Trainer (specialization unknown)"
@@ -55,10 +59,10 @@ function P.Step(s,budget)
         local npc=s.lib.Npc;local flags=A.Call(npc.Get,id,"npcFlags")
         local starts,ends=A.Call(npc.Get,id,"questStarts"),A.Call(npc.Get,id,"questEnds")
         local title=A.Call(npc.Get,id,"subName");local raw=A.Call(npc.GetRaw,id,"subName")
-        local category,role,class,profession=P.Classify(title,flags,starts,ends)
-        if not class and not profession and raw then
+        local category,role,class,profession=P.Classify(title,flags,starts,ends,id)
+        if category~="transmog" and not class and not profession and raw then
             local rc,rr,rclass,rprofession=P.Classify(raw,flags,starts,ends)
-            if rclass or rprofession then category,role,class,profession=rc,rr,rclass,rprofession end
+            if rc=="transmog" or rclass or rprofession then category,role,class,profession=rc,rr,rclass,rprofession end
         end
         if category then
             local name=A.Call(npc.Get,id,"name");local spawns=A.Call(npc.Get,id,"spawns")
@@ -73,7 +77,7 @@ function P.Step(s,budget)
                     local p=map and type(xyz)=="table" and M.Number(xyz[1]) and M.Number(xyz[2]) and A.FromMap(map,xyz[1]/100,xyz[2]/100)
                     if p then
                         p.id="qdb:"..id..":"..area..":"..index;p.npcID=id;p.name=name or tostring(id)
-                        p.category=category;p.class=class;p.profession=profession;p.role=title or role;p.faction=faction;p.available=faction~=nil
+                        p.category=category;p.class=class;p.profession=profession;p.role=title and title~="" and title or role;p.faction=faction;p.available=faction~=nil
                         p.categories={};p.categories[category]=true
                         if type(starts)=="table" and next(starts) or type(ends)=="table" and next(ends) then p.categories.quest=true end
                         p.questStarts=type(starts)=="table" and #starts or 0;p.questEnds=type(ends)=="table" and #ends or 0
