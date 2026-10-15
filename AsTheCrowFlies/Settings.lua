@@ -122,10 +122,12 @@ function S.ResetProfile(store)
     local profile=M.Copy(S.defaults);store.profiles[store.active]=profile;return profile
 end
 function S.Character(saved,build)
+    -- Visibility belongs to the character, not an appearance profile or build.
+    local hidden=not (type(saved)=="table" and saved.hidden==false)
     if type(saved)~="table" or saved.version~=1 then
-        return {version=1,build=build,known={},offers={},timings={},places={}}
+        return {version=1,build=build,hidden=hidden,known={},offers={},timings={},places={}}
     end
-    local out={version=1,build=build,known={},offers={},timings={},places={}}
+    local out={version=1,build=build,hidden=hidden,known={},offers={},timings={},places={}}
     local sameBuild=saved.build==build
     for id,v in pairs(sameBuild and type(saved.known)=="table" and saved.known or {}) do
         if type(id)=="number" and type(v)=="table" and (v.state=="known" or v.state=="undiscovered") then out.known[id]=M.Copy(v) end

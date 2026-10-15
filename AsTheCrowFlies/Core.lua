@@ -70,6 +70,7 @@ function C:SetRouteOrder(value)
 end
 function C:ShowPanel(show)
     self.hidden=not show;if show then self.tucked=false end
+    self.character.hidden=self.hidden
     if N.UI.menu then N.UI.menu:Hide() end
     for _,d in ipairs(N.UI.dropdowns or {}) do d:CloseMenu() end
     self:Refresh()
@@ -274,6 +275,7 @@ function C:Initialize()
     if not self.readOnly then AsTheCrowFliesDB=self.profile end
     local futureCharacter=type(AsTheCrowFliesCharacter)=="table" and type(AsTheCrowFliesCharacter.version)=="number" and AsTheCrowFliesCharacter.version>1
     self.character=N.Settings.Character(AsTheCrowFliesCharacter,self.build)
+    self.hidden=self.character.hidden;self.tucked=false
     if not futureCharacter then AsTheCrowFliesCharacter=self.character end
     self.data={nodes={},edges={}}
     local localData=N.Data.LocalTaxi

@@ -16,7 +16,7 @@ function methods:SetScript(event,fn) self.scripts[event]=fn end
 function methods:GetScript(event) return self.scripts[event] end
 function methods:HookScript(event,fn) local previous=self.scripts[event];self.scripts[event]=function(...) if previous then previous(...) end;fn(...) end end
 function methods:RegisterEvent(event) self.events[event]=true end
-function methods:Show() local changed=self.shown==false;self.shown=true;if changed and self.scripts.OnShow then self.scripts.OnShow(self) end end
+function methods:Show() self.showCount=(self.showCount or 0)+1;local changed=self.shown==false;self.shown=true;if changed and self.scripts.OnShow then self.scripts.OnShow(self) end end
 function methods:Hide() local changed=self.shown~=false;self.shown=false;if changed and self.scripts.OnHide then self.scripts.OnHide(self) end end
 function methods:SetShown(v) if v then self:Show() else self:Hide() end end
 function methods:IsShown() return self.shown~=false end
@@ -1847,5 +1847,108 @@ test('transmog results compare route select Go and interaction arrival through t
     C:Go();UnitGUID=function(unit) assert(unit=='npc');return 'Creature-0-1234-0-0-270581-000000ABCD' end
     C.events.scripts.OnEvent(nil,'GOSSIP_SHOW');assert(not C.nav.route and C.arrivalUntil)
     C.profile=profile;C.profiles=profiles;cleanup();C:BindFilters();C:ApplyProfile()
+end)
+-- Re-load the real TOC into a fresh namespace with restored SavedVariables.
+-- Keep these independent lifecycle checks last so earlier interaction fixtures
+-- cannot accidentally supply a hidden flag or pre-created frame at startup.
+local function boot(character,legacy,profiles,provider)
+    timers={}
+    AsTheCrowFliesCharacter=N.Model.Copy(character)
+    AsTheCrowFliesDB=N.Model.Copy(legacy)
+    AsTheCrowFliesProfiles=N.Model.Copy(profiles)
+    local fresh={}
+    for _,name in ipairs(files) do assert(loadfile(ROOT..'/AsTheCrowFlies/'..name))('AsTheCrowFlies',fresh) end
+    if provider then
+        fresh.Providers.Connect=function() return {items={},ids={},cursor=1} end
+        fresh.Providers.Step=function() return true end
+    end
+    local c=fresh.Core
+    assert(not c.ready and not fresh.UI.frame,'frames must wait for restored SavedVariables')
+    c.events.scripts.OnEvent(nil,'ADDON_LOADED','AnotherAddon');assert(not c.ready)
+    c.events.scripts.OnEvent(nil,'ADDON_LOADED','AsTheCrowFlies');assert(c.ready)
+    return fresh
+end
+local function flushLifecycle()
+    for _=1,20 do
+        if #timers==0 then return end
+        local pending=timers;timers={};for _,fn in ipairs(pending) do fn() end
+    end
+    error('lifecycle callbacks did not settle')
+end
+local function hiddenLifecycle(fresh)
+    local c,u=fresh.Core,fresh.UI
+    local function check() assert(c.hidden and not u.frame:IsShown() and not u.handle:IsShown(),'hidden panel or tab reopened') end
+    check()
+    for _,event in ipairs({'PLAYER_LOGIN','PLAYER_ENTERING_WORLD','UI_SCALE_CHANGED','DISPLAY_SIZE_CHANGED','ADDON_LOADED','TAXIMAP_OPENED','TAXIMAP_CLOSED','GOSSIP_SHOW'}) do
+        c.events.scripts.OnEvent(nil,event,'LibSharedMedia-3.0');flushLifecycle();c:Tick();check()
+    end
+end
+test('fresh and legacy startups stay hidden throughout login and provider completion',function()
+    for _,character in ipairs({false,{version=1,build='1.60.1.70338',known={},timings={},places={}}}) do
+        local fresh=boot(character or nil,{font='Arial',width=420,scale=.85},nil,true)
+        local c,u=fresh.Core,fresh.UI
+        hiddenLifecycle(fresh)
+        assert(c.character.hidden==true and AsTheCrowFliesCharacter==c.character)
+        assert(c.profile.font=='Arial' and c.profile.width==420 and c.profile.scale==.85)
+        assert(not u.frame.showCount and not u.handle.showCount,'startup must never transiently reveal a panel or tab')
+    end
+end)
+test('explicit hide survives logout reload and login with settings and character knowledge',function()
+    local fresh=boot({version=1,build='1.60.1.70338',hidden=false,known={[90]={state='known',faction='Alliance'}},timings={trip={20,22}},places={}},
+        {font='Arial',width=420,searchFilters={categories={transmog=true}}})
+    SlashCmdList.ASTHECROWFLIES('show');assert(fresh.UI.frame:IsShown())
+    SlashCmdList.ASTHECROWFLIES('hide');assert(AsTheCrowFliesCharacter.hidden==true)
+    fresh.Core.events.scripts.OnEvent(nil,'PLAYER_LOGOUT')
+    local reloaded=boot(AsTheCrowFliesCharacter,AsTheCrowFliesDB,AsTheCrowFliesProfiles,true)
+    hiddenLifecycle(reloaded)
+    assert(reloaded.Core.profile.width==420 and reloaded.Core.profile.searchFilters.categories.transmog)
+    assert(reloaded.Core.character.known[90].state=='known' and reloaded.Core.character.timings.trip[2]==22)
+    assert(reloaded.Core.nav.route==nil,'reload must still stop navigation')
+end)
+test('show settings buttons and keybinding reveal update the durable visibility choice',function()
+    local fresh=boot();local c,u,o=fresh.Core,fresh.UI,fresh.Options
+    o.showPanel.scripts.OnClick();assert(u.frame:IsShown() and AsTheCrowFliesCharacter.hidden==false)
+    o.hidePanel.scripts.OnClick();assert(not u.frame:IsShown() and AsTheCrowFliesCharacter.hidden==true)
+    AsTheCrowFlies_Toggle();assert(u.frame:IsShown() and not c.hidden and AsTheCrowFliesCharacter.hidden==false)
+    local reloaded=boot(AsTheCrowFliesCharacter,AsTheCrowFliesDB,AsTheCrowFliesProfiles)
+    assert(reloaded.UI.frame:IsShown() and reloaded.Core.character.hidden==false,'explicit show restores across login')
+    reloaded.UI:SetDock(reloaded.Core,'right',true)
+    assert(reloaded.UI.handle:IsShown() and AsTheCrowFliesCharacter.hidden==false,'tuck is separate from Hide')
+    SlashCmdList.ASTHECROWFLIES('hide');assert(not reloaded.UI.handle:IsShown())
+    SlashCmdList.ASTHECROWFLIES('show');assert(reloaded.UI.frame:IsShown() and not reloaded.Core.tucked)
+end)
+test('profile placement and options changes cannot reveal a hidden panel',function()
+    local fresh=boot();local c,u,o=fresh.Core,fresh.UI,fresh.Options
+    SlashCmdList.ASTHECROWFLIES('opts');assert(o.frame:IsShown());hiddenLifecycle(fresh)
+    for _,entry in ipairs({{'DuplicateProfile','Other'},{'SwitchProfile','Default'},{'CopyProfile','Other'},{'ResetProfile'}}) do
+        assert(o:ProfileAction(entry[1],entry[2]));hiddenLifecycle(fresh)
+    end
+    u:SetDock(c,'right',true);hiddenLifecycle(fresh)
+    u:SetDock(c,'none',false);hiddenLifecycle(fresh)
+    assert(c.character.hidden and AsTheCrowFliesCharacter.hidden)
+end)
+test('visibility survives build changes and invalid values default hidden without mutating future data',function()
+    local s=N.Settings
+    for _,value in ipairs({true,false}) do
+        local saved={version=1,build='old',hidden=value,known={[90]={state='known'}},timings={trip={20}},places={}}
+        local loaded=s.Character(saved,'new')
+        assert(loaded.hidden==value and not next(loaded.known) and not next(loaded.timings))
+    end
+    for _,value in ipairs({0,'false',{},true}) do assert(s.Character({version=1,hidden=value},'new').hidden==true) end
+    local future={version=99,hidden=true,unknown='keep'}
+    local fresh=boot(future,{version=99,unknown='profile'},{version=99,unknown='store'})
+    fresh.Core:ShowPanel(true)
+    assert(AsTheCrowFliesCharacter.version==99 and AsTheCrowFliesCharacter.hidden==true and AsTheCrowFliesCharacter.unknown=='keep')
+    assert(AsTheCrowFliesDB.version==99 and AsTheCrowFliesDB.unknown=='profile' and AsTheCrowFliesProfiles.version==99)
+end)
+test('main panel uses QuestBrief search border while profile background remains configurable',function()
+    local fresh=boot();local c,u=fresh.Core,fresh.UI;local f=u.frame;local b=f.backdrop
+    assert(f.template=='BackdropTemplate' and b.edgeFile=='Interface\\DialogFrame\\UI-DialogBox-Border')
+    assert(b.bgFile=='Interface\\Buttons\\WHITE8X8' and b.tile and b.tileSize==8 and b.edgeSize==16)
+    for _,side in ipairs({'left','right','top','bottom'}) do assert(b.insets[side]==4) end
+    assert(f.borderColor[1]==.65 and f.borderColor[2]==.65 and f.borderColor[3]==.65 and f.borderColor[4]==1)
+    c.profile.colors.background={.2,.3,.4};c:ApplyProfile()
+    assert(f.backdropColor[1]==.2 and f.backdropColor[2]==.3 and f.backdropColor[3]==.4 and f.backdropColor[4]==.97)
+    assert(c.hidden and not f:IsShown(),'appearance must respect visibility')
 end)
 print('PASS runtime scenarios: '..count..'; frames allocated='..#frames)
