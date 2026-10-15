@@ -127,6 +127,7 @@ function U:ApplyAppearance()
     self:HideRowTip()
     local colors=self.owner.profile.colors
     if not colors then return end
+    self.frame:SetBackdropColor(colors.background[1],colors.background[2],colors.background[3],.97)
     for _,surface in ipairs(self.backgrounds or {}) do surface:SetVertexColor(colors.background[1],colors.background[2],colors.background[3],.97) end
     for _,entry in ipairs(self.texts) do if not entry[1].atcfOptions and not entry[1].atcfTooltip then entry[1]:SetTextColor(unpack(colors.text)) end end
     for _,row in ipairs(self.rows or {}) do row.name:SetTextColor(1,.82,0);row.lockedText:SetTextColor(.95,.25,.25) end
@@ -269,7 +270,7 @@ end
 function U:SetDock(c,side,tuck)
     self:FinishMove(c,false);self:FinishResize(c,false)
     self:FinishHandleDrag()
-    c.profile.dock=(side=="left" or side=="right") and side or "none";c.tucked=tuck and c.profile.dock~="none" or false;c.hidden=false
+    c.profile.dock=(side=="left" or side=="right") and side or "none";c.tucked=tuck and c.profile.dock~="none" or false
     N.Options:RefreshPlacement()
     self:Layout(c)
 end
@@ -459,8 +460,11 @@ function U:Edit(parent,label,y,origin)
     return e
 end
 function U:Create(c)
-    self.owner=c;local f=CreateFrame("Frame","AsTheCrowFliesPanel",UIParent);self.frame=f
-    f:SetMovable(true);f:SetResizable(true);f:EnableMouse(true);f:SetClampedToScreen(true);f:SetFrameStrata(c.profile.strata);f:SetFrameLevel(100);self:Surface(f)
+    self.owner=c;local f=CreateFrame("Frame","AsTheCrowFliesPanel",UIParent,"BackdropTemplate");self.frame=f;f:Hide()
+    f:SetMovable(true);f:SetResizable(true);f:EnableMouse(true);f:SetClampedToScreen(true);f:SetFrameStrata(c.profile.strata);f:SetFrameLevel(100)
+    -- Match QuestBrief's search frame; retain this profile's background color.
+    f:SetBackdrop({bgFile="Interface\\Buttons\\WHITE8X8",edgeFile="Interface\\DialogFrame\\UI-DialogBox-Border",tile=true,tileSize=8,edgeSize=16,insets={left=4,right=4,top=4,bottom=4}})
+    f:SetBackdropBorderColor(.65,.65,.65,1)
     local header=CreateFrame("Frame",nil,f);self.header=header;header:SetPoint("TOPLEFT");header:SetSize(c.profile.width-78,44);header:EnableMouse(true);header:RegisterForDrag("LeftButton")
     header:SetScript("OnDragStart",function()
         if c.profile.locked or c.hidden or c.tucked or self.resizing then return end
@@ -551,7 +555,7 @@ function U:Create(c)
     end)
     self:PauseIcon(c)
     self.fold=self:Button(f,"Fold",14,-125,50,30,function() c.compact=true;c:Refresh() end)
-    local handle=CreateFrame("Button",nil,UIParent);self.handle=handle;handle:SetSize(24,64);handle:SetFrameStrata(c.profile.strata);handle:SetFrameLevel(100);handle:RegisterForDrag("LeftButton")
+    local handle=CreateFrame("Button",nil,UIParent);self.handle=handle;handle:Hide();handle:SetSize(24,64);handle:SetFrameStrata(c.profile.strata);handle:SetFrameLevel(100);handle:RegisterForDrag("LeftButton")
     handle.bg=self:Rectangle(handle,{.13,.14,.17,1});handle.normalColor={.13,.14,.17,1};handle.hoverColor={.22,.24,.28,1}
     handle.text=self:Text(handle,">",16,0,0,24,64);handle.text:SetJustifyH("CENTER")
     handle:SetScript("OnMouseDown",function(_,button) if button=="LeftButton" then self.handleSuppressClick=false end end)
@@ -814,7 +818,7 @@ function U:Guidance(c,p,ctx,now)
     if c.compact and self:LayoutGuidance(c) then self:Layout(c) end
 end
 function U:Toggle(c)
-    if c.hidden then c.hidden=false;c.tucked=false elseif c.tucked then c.tucked=false elseif c.nav.route then c.compact=not c.compact else c.tucked=true end
+    if c.hidden then c:ShowPanel(true);return elseif c.tucked then c.tucked=false elseif c.nav.route then c.compact=not c.compact else c.tucked=true end
     self:Refresh(c)
 end
 _G.BINDING_HEADER_ASTHECROWFLIES="As The Crow Flies"

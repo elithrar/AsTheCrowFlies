@@ -1,5 +1,11 @@
 # Validation and acceptance status
 
+## v0.1.4 visibility and panel border, 2026-10-15
+
+The focused fix passes 159 Lua 5.1 scenarios (48 model and 111 mocked runtime), 19 release guard tests and five source-package tests, with the private override test skipped. Fresh-namespace TOC regressions restore SavedVariables through the actual `ADDON_LOADED` handler, exercise first-use/legacy startup, explicit Hide and Show, logout/reload/login, queued provider completion, world-entry/taxi/display/font events, options/profile/placement changes, build invalidation and future-schema preservation. The startup regression fails against the prior `433dbe2` implementation because the panel reopens. Explicit Show is restored on subsequent login; missing/malformed choices default hidden. Tuck remains independent.
+
+Independent review caught an initial result-card border selection; the final main panel instead matches the actual `QuestBriefSearch` constructor's `U:Dialog(f)` in the read-only 2026-10-14 task-2 checkout: `BackdropTemplate`, `UI-DialogBox-Border`, 16-pixel edge, four-pixel insets and gray .65 border at full opacity. The regression checks this construction and retains the user's configurable background color. No QuestBrief files were modified. The supplied Library screenshot could not be visually opened because this host's materialization/browser tooling failed; its extracted text was available. Native border rendering and actual in-game reload/login remain unobserved. No game reload was requested or triggered.
+
 ## Local transmogrifier change, 2026-10-12
 
 The candidate based on `ef8a91f` passes 151 Lua 5.1 scenarios (48 model and 103 mocked runtime), three installed-provider and exact-build map audit tests, 19 release guard tests and five source-package tests. The private package override test is intentionally skipped. `git diff --check` passes. This change does not alter the addon version or install game files. Native checks below remain pending.
