@@ -1,8 +1,8 @@
 local _,N=...;local O={};N.Options=O
--- Match the installed XPIsland dialog's native controls, sizing and chrome.
-local backdrop={bgFile="Interface\\Buttons\\WHITE8X8",edgeFile="Interface\\Tooltips\\UI-Tooltip-Border",tile=true,tileSize=8,edgeSize=10,insets={left=2,right=2,top=2,bottom=2}}
+-- FindAnUpgrade is the reference for native controls, sizing and chrome.
 local gold={1,.82,.2}
-local dialogWidth,dialogHeight=620,500
+local dialogWidth,dialogHeight=640,500
+local bodyWidth,bodyHeight=608,404
 function O:Label(parent,text,x,y,width,size,color)
     local t=parent:CreateFontString(nil,"OVERLAY");t.atcfFixedFont=true;t.atcfOptions=true;N.UI:Font(t,size or 12)
     t:SetPoint("TOPLEFT",x,y);t:SetSize(width or 260,(size or 12)+6);t:SetJustifyH("LEFT");t:SetJustifyV("MIDDLE");t:SetWordWrap(false)
@@ -13,14 +13,13 @@ function O:Bound(t,width,height,point,parent,relative,x,y)
 end
 function O:Button(parent,text,x,y,width,callback)
     local b=CreateFrame("Button",nil,parent,"BackdropTemplate");b:SetPoint("TOPLEFT",x,y);b:SetSize(width,22)
-    b:SetBackdrop(backdrop);b:SetBackdropColor(.06,.06,.065,.8);b:SetBackdropBorderColor(.45,.45,.45,.65)
+    N.UI:StyleButton(b)
     b.text=self:Label(b,text,0,0,width-12);self:Bound(b.text,width-12,20,"CENTER",b,"CENTER",0,0)
-    b:SetScript("OnEnter",function() b:SetBackdropBorderColor(.9,.8,.5,.9) end)
-    b:SetScript("OnLeave",function() b:SetBackdropBorderColor(.45,.45,.45,.65) end);b:SetScript("OnClick",callback);return b
+    b:SetScript("OnClick",callback);return b
 end
 function O:Section(parent,label,x,y,w,h)
     local box=CreateFrame("Frame",nil,parent,"BackdropTemplate");box:SetFrameLevel(parent:GetFrameLevel()-1)
-    box:SetPoint("TOPLEFT",x,y-9);box:SetSize(w,h);box:SetBackdrop(backdrop);box:SetBackdropColor(.035,.035,.04,.35);box:SetBackdropBorderColor(.35,.35,.35,.5)
+    box:SetPoint("TOPLEFT",x,y-9);box:SetSize(w,h);N.UI:Section(box)
     self:Label(parent,label,x+10,y,w-20,12,gold);return box
 end
 function O:Edit(parent,x,y,width)
@@ -31,7 +30,44 @@ end
 function O:Dropdown(parent,x,y,width,label,entries,choose)
     local d=N.UI:Menu(parent,x,y,width,label,entries,choose);d:SetHeight(24)
     d.Text.atcfFixedFont=true;d.Text.atcfOptions=true;N.UI:Font(d.Text,12);d.Text:SetTextColor(.93,.94,.97)
-    self:Bound(d.Text,width-31,24,"LEFT",d,"LEFT",9,0);return d
+    self:Bound(d.Text,width-31,24,"LEFT",d,"LEFT",9,0);self.bounded[#self.bounded].dropdown=d
+    -- Generated native selection text can replace the fallback at any time.
+    hooksecurefunc(d.Text,"SetText",function(_,value) if not d.formattingCaption then self:Caption(d,value) end end)
+    d:HookScript("OnEnter",function()
+        if d.truncatedCaption then GameTooltip:SetOwner(d,"ANCHOR_RIGHT");GameTooltip:SetText(d.fullCaption,nil,nil,nil,nil,true);GameTooltip:Show() end
+    end)
+    local function hideTip() if GameTooltip:GetOwner()==d then GameTooltip:Hide() end end
+    d:HookScript("OnLeave",hideTip);d:HookScript("OnHide",hideTip)
+    self:Caption(d,d.Text:GetText());return d
+end
+function O:Caption(dropdown,value)
+    local t=dropdown.Text;local label=value or ""
+    dropdown.fullCaption=label;dropdown.formattingCaption=true
+    t:SetScale(1);t:SetText(label)
+    local scale=t:GetEffectiveScale();local available=dropdown:GetWidth()-31
+    local function width() return (math.ceil(t:GetUnboundedStringWidth()*scale)+4)/scale end
+    dropdown.truncatedCaption=width()>available
+    if dropdown.truncatedCaption then
+        repeat
+            -- Remove complete UTF-8 codepoints, preserving the stored value.
+            local last=#label
+            while last>1 and label:byte(last)>=128 and label:byte(last)<192 do last=last-1 end
+            label=label:sub(1,last-1);t:SetText(label.."...")
+        until width()<=available or label==""
+    end
+    dropdown.formattingCaption=nil
+end
+function O:CloseTransient()
+    for _,d in ipairs(N.UI.dropdowns or {}) do
+        d:CloseMenu();if GameTooltip:GetOwner()==d then GameTooltip:Hide() end
+    end
+    for _,e in ipairs({self.name,self.fontSize,self.scaleEdit}) do e:ClearFocus() end
+end
+function O:Scroll(offset)
+    offset=math.max(0,math.min(self.maximum or 0,offset))
+    if offset~=(self.offset or 0) then self:CloseTransient() end
+    self.offset=offset;self.scrolling=true
+    self.scroll:SetVerticalScroll(offset);self.bar:SetValue(offset);self.scrolling=nil
 end
 function O:Check(parent,label,key,x,y)
     local b=CreateFrame("CheckButton",nil,parent,"UICheckButtonTemplate");b:SetPoint("TOPLEFT",x-4,y);b:SetSize(24,24)
@@ -44,8 +80,7 @@ function O:Create(c)
     self.owner=c;self.bounded={};local U=N.UI
     local f=CreateFrame("Frame","AsTheCrowFliesOptions",UIParent,"BackdropTemplate");self.frame=f
     f:SetSize(dialogWidth,dialogHeight);f:SetPoint("CENTER");f:SetFrameStrata("DIALOG");f:SetClampedToScreen(true);f:EnableMouse(true);f:SetMovable(true);f:RegisterForDrag("LeftButton")
-    f:SetBackdrop({bgFile="Interface\\Buttons\\WHITE8X8",edgeFile="Interface\\DialogFrame\\UI-DialogBox-Border",tile=true,tileSize=8,edgeSize=16,insets={left=4,right=4,top=4,bottom=4}})
-    f:SetBackdropColor(.045,.045,.05,.94);f:SetBackdropBorderColor(.65,.65,.65,1)
+    U:Dialog(f)
     f:SetScript("OnDragStart",function() f:StartMoving() end);f:SetScript("OnDragStop",function() f:StopMovingOrSizing() end)
     local content=CreateFrame("Frame",nil,f);content:SetAllPoints()
     self:Label(content,"As The Crow Flies",20,-15,350,16,gold)
@@ -57,27 +92,37 @@ function O:Create(c)
         tab.activeLine=tab:CreateTexture(nil,"OVERLAY");tab.activeLine:SetHeight(1);tab.activeLine:SetColorTexture(1,.82,.2,.8)
         tab.activeLine:SetPoint("BOTTOMLEFT",tab,"BOTTOMLEFT",4,0);tab.activeLine:SetPoint("BOTTOMRIGHT",tab,"BOTTOMRIGHT",-4,0)
     end
-    self.appearance=CreateFrame("Frame",nil,content);self.appearance:SetAllPoints()
-    self.profilePage=CreateFrame("Frame",nil,content);self.profilePage:SetAllPoints()
+    local scroll=CreateFrame("ScrollFrame",nil,content);self.scroll=scroll
+    scroll:SetPoint("TOPLEFT",0,-72);scroll:SetSize(bodyWidth,bodyHeight);scroll:EnableMouseWheel(true)
+    local body=CreateFrame("Frame",nil,scroll);self.body=body;body:SetSize(bodyWidth,bodyHeight);scroll:SetScrollChild(body)
+    scroll:SetScript("OnMouseWheel",function(_,delta) self:Scroll((self.offset or 0)-delta*28) end)
+    -- Vertical native assets, matching FAU; UISliderTemplate has horizontal art.
+    local bar=CreateFrame("Slider",nil,content,"BackdropTemplate");self.bar=bar
+    bar:SetPoint("TOPRIGHT",-14,-76);bar:SetSize(12,bodyHeight-8);bar:SetOrientation("VERTICAL");bar:EnableMouse(true)
+    bar:SetBackdrop({bgFile="Interface\\Buttons\\UI-SliderBar-Background",edgeFile="Interface\\Buttons\\UI-SliderBar-Border",tile=true,tileSize=8,edgeSize=8,insets={left=3,right=3,top=3,bottom=3}})
+    bar:SetThumbTexture("Interface\\Buttons\\UI-SliderBar-Button-Vertical");bar:GetThumbTexture():SetSize(12,22);bar:SetValueStep(1)
+    bar:SetScript("OnValueChanged",function(_,value) if not self.scrolling then self:Scroll(value) end end)
+    self.appearance=CreateFrame("Frame",nil,body);self.appearance:SetAllPoints()
+    self.profilePage=CreateFrame("Frame",nil,body);self.profilePage:SetAllPoints()
     local page=self.appearance
-    self:Section(page,"Appearance",16,-80,288,250)
-    self:Section(page,"Navigation",316,-80,288,168)
-    self:Section(page,"Position",316,-272,288,191)
-    self:Label(page,"Font",28,-105)
-    self.font=self:Dropdown(page,28,-125,260,"Expressway",function()
+    self:Section(page,"Appearance",16,-8,288,250)
+    self:Section(page,"Navigation",316,-8,288,168)
+    self:Section(page,"Position",316,-200,288,191)
+    self:Label(page,"Font",28,-33)
+    self.font=self:Dropdown(page,28,-53,260,"Expressway",function()
         local names={Expressway=true,["Game font"]=true,Arial=true};local lsm=LibStub and LibStub("LibSharedMedia-3.0",true)
         if lsm then for _,name in ipairs(lsm:List("font")) do names[name]=true end end
         local values={};for name in pairs(names) do values[#values+1]={label=name,value=name} end;table.sort(values,function(a,b) return a.label<b.label end);return values
     end,function(value) c.profile.font=value;c:ApplyProfile() end)
-    self:Label(page,"Font size",28,-173)
-    self.fontSize=self:Edit(page,230,-169,58)
+    self:Label(page,"Font size",28,-101)
+    self.fontSize=self:Edit(page,230,-97,58)
     self.fontSize:SetScript("OnEnterPressed",function(e)
         c.profile.fontSize=math.floor(math.max(10,math.min(18,tonumber(e:GetText()) or c.profile.fontSize)));e:ClearFocus();c:ApplyProfile()
     end)
-    self:Label(page,"Island scale",28,-217)
-    self.scale=CreateFrame("Slider",nil,page,"UISliderTemplate");self.scale:SetPoint("TOPLEFT",28,-242);self.scale:SetSize(180,16)
+    self:Label(page,"Island scale",28,-145)
+    self.scale=CreateFrame("Slider",nil,page,"UISliderTemplate");self.scale:SetPoint("TOPLEFT",28,-170);self.scale:SetSize(180,16)
     self.scale:SetOrientation("HORIZONTAL");self.scale:SetMinMaxValues(50,160);self.scale:SetValueStep(1);self.scale:SetObeyStepOnDrag(true)
-    self.scaleEdit=self:Edit(page,230,-237,58)
+    self.scaleEdit=self:Edit(page,230,-165,58)
     self.scale:SetScript("OnValueChanged",function(_,value)
         if self.refreshing then return end
         c.profile.scale=math.max(50,math.min(160,math.floor(value+.5)))/100;c:ApplyProfile()
@@ -85,56 +130,56 @@ function O:Create(c)
     self.scaleEdit:SetScript("OnEnterPressed",function(e)
         c.profile.scale=math.max(50,math.min(160,math.floor((tonumber(e:GetText()) or c.profile.scale*100)+.5)))/100;e:ClearFocus();c:ApplyProfile()
     end)
-    self:Label(page,"50–160%",28,-264,260,11,{.65,.65,.68})
+    self:Label(page,"50–160%",28,-192,260,11,{.65,.65,.68})
     self.colors={}
     for i,entry in ipairs({{"Background","background"},{"Text","text"}}) do
         local key=entry[2];local x=28+(i-1)*136
-        local b=self:Button(page,entry[1],x,-306,124,function() self:Color(key) end)
+        local b=self:Button(page,entry[1],x,-234,124,function() self:Color(key) end)
         self.bounded[#self.bounded]=nil;self:Bound(b.text,90,20,"LEFT",b,"LEFT",27,0)
         b.swatch=b:CreateTexture(nil,"OVERLAY");b.swatch:SetPoint("LEFT",b,"LEFT",7,0);b.swatch:SetSize(12,12);self.colors[key]=b
     end
-    self:Label(page,"Route order",328,-105)
-    self.order=self:Dropdown(page,328,-125,260,"Distance",function() return {{label="Distance",value="distance"},{label="Estimated time",value="time"}} end,function(value)
+    self:Label(page,"Route order",328,-33)
+    self.order=self:Dropdown(page,328,-53,260,"Distance",function() return {{label="Distance",value="distance"},{label="Estimated time",value="time"}} end,function(value)
         c:SetRouteOrder(value)
     end)
-    self.overlays=self:Check(page,"World / zone map markers","mapMarkers",328,-166)
+    self.overlays=self:Check(page,"World / zone map markers","mapMarkers",328,-94)
     self.mapMarkers=self.overlays
-    self.minimapMarkers=self:Check(page,"Minimap markers","minimapMarkers",328,-194)
-    self.locked=self:Check(page,"Lock position","locked",328,-222)
-    self.placement=self:Dropdown(page,328,-296,260,"Free (dragged)",function() return {
+    self.minimapMarkers=self:Check(page,"Minimap markers","minimapMarkers",328,-122)
+    self.locked=self:Check(page,"Lock position","locked",328,-150)
+    self.placement=self:Dropdown(page,328,-224,260,"Free (dragged)",function() return {
         {label="Free (dragged)",value="none"},{label="Left screen edge",value="left"},{label="Right screen edge",value="right"}
     } end,function(value) U:SetDock(c,value,true);c:ApplyProfile() end)
-    local layerLabel=self:Label(page,"Frame layer",328,-337,92)
-    self:Bound(layerLabel,92,24,"LEFT",page,"TOPLEFT",328,-346)
-    self.strata=self:Dropdown(page,432,-334,156,"High",function() return {
+    local layerLabel=self:Label(page,"Frame layer",328,-265,92)
+    self:Bound(layerLabel,92,24,"LEFT",page,"TOPLEFT",328,-274)
+    self.strata=self:Dropdown(page,432,-262,156,"High",function() return {
         {label="Low",value="LOW"},{label="Medium",value="MEDIUM"},{label="High",value="HIGH"}
     } end,function(value) c.profile.strata=value;c:ApplyProfile() end)
-    local hint=self:Label(page,"Drag to either edge to dock and hide. Click the edge tab to reopen.",328,-372,260,11,{.7,.7,.72});hint:SetWordWrap(true);hint:SetHeight(36)
-    self.resetPlacement=self:Button(page,"Reset placement",328,-414,124,function() c.profile.x=24;c.profile.y=-180;c.profile.dockPosition=.5;U:SetDock(c,"none",false);c:ApplyProfile() end)
-    self.togglePanel=self:Button(page,"Expand / tuck",464,-414,124,function() U:Toggle(c) end)
-    self.showPanel=self:Button(page,"Show panel",328,-442,124,function() c:ShowPanel(true) end)
-    self.hidePanel=self:Button(page,"Hide panel",464,-442,124,function() c:ShowPanel(false) end)
-    local fontHint=self:Label(page,"Font size changes the island text. Scale changes the whole island.",28,-358,260,11,{.7,.7,.72});fontHint:SetWordWrap(true);fontHint:SetHeight(36)
-    local profiles=self.profilePage;self:Section(profiles,"Profiles",16,-80,588,340)
-    self:Label(profiles,"Active profile",28,-108)
-    self.active=self:Dropdown(profiles,28,-130,260,"Default",function() return self:ProfileEntries() end,function(name) self:ProfileAction("SwitchProfile",name) end)
-    self:Label(profiles,"New profile name",28,-181)
-    self.name=self:Edit(profiles,28,-203,260)
-    self.duplicate=self:Button(profiles,"Duplicate and use",328,-203,260,function() if self:ProfileAction("DuplicateProfile",self.name:GetText()) then self.name:SetText("");self.name:ClearFocus() end end)
+    local hint=self:Label(page,"Drag to either edge to dock and hide. Click the edge tab to reopen.",328,-300,260,11,{.7,.7,.72});hint:SetWordWrap(true);hint:SetHeight(36)
+    self.resetPlacement=self:Button(page,"Reset placement",328,-342,124,function() c.profile.x=24;c.profile.y=-180;c.profile.dockPosition=.5;U:SetDock(c,"none",false);c:ApplyProfile() end)
+    self.togglePanel=self:Button(page,"Expand / tuck",464,-342,124,function() U:Toggle(c) end)
+    self.showPanel=self:Button(page,"Show panel",328,-370,124,function() c:ShowPanel(true) end)
+    self.hidePanel=self:Button(page,"Hide panel",464,-370,124,function() c:ShowPanel(false) end)
+    local fontHint=self:Label(page,"Font size changes the island text. Scale changes the whole island.",28,-286,260,11,{.7,.7,.72});fontHint:SetWordWrap(true);fontHint:SetHeight(36)
+    local profiles=self.profilePage;self:Section(profiles,"Profiles",16,-8,588,340)
+    self:Label(profiles,"Active profile",28,-36)
+    self.active=self:Dropdown(profiles,28,-58,260,"Default",function() return self:ProfileEntries() end,function(name) self:ProfileAction("SwitchProfile",name) end)
+    self:Label(profiles,"New profile name",28,-109)
+    self.name=self:Edit(profiles,28,-131,260)
+    self.duplicate=self:Button(profiles,"Duplicate and use",328,-131,260,function() if self:ProfileAction("DuplicateProfile",self.name:GetText()) then self.name:SetText("");self.name:ClearFocus() end end)
     self.name:SetScript("OnEnterPressed",function() self.duplicate:GetScript("OnClick")() end)
-    self:Label(profiles,"Copy settings from",28,-254)
-    self.copySource=self:Dropdown(profiles,28,-276,260,"Choose profile",function() return self:ProfileEntries() end,function(value) self.copyName=value;self.confirm=nil;self:Refresh() end)
-    self.copy=self:Button(profiles,"Copy settings",328,-276,260,function()
+    self:Label(profiles,"Copy settings from",28,-182)
+    self.copySource=self:Dropdown(profiles,28,-204,260,"Choose profile",function() return self:ProfileEntries() end,function(value) self.copyName=value;self.confirm=nil;self:Refresh() end)
+    self.copy=self:Button(profiles,"Copy settings",328,-204,260,function()
         if not self.copyName then self.status:SetText("Choose a profile.");return end
         if self.confirm~="copy" then self.confirm="copy";self:Refresh();return end
         self:ProfileAction("CopyProfile",self.copyName)
     end)
-    self.reset=self:Button(profiles,"Reset active profile",28,-366,260,function()
+    self.reset=self:Button(profiles,"Reset active profile",28,-294,260,function()
         if self.confirm~="reset" then self.confirm="reset";self:Refresh();return end;self:ProfileAction("ResetProfile")
     end)
-    self.cancel=self:Button(profiles,"Cancel",328,-366,260,function() self.confirm=nil;self:Refresh() end)
-    self.status=self:Label(content,"",20,-480,580,11,{.8,.8,.8})
-    f:SetScript("OnHide",function() self:CloseColor();self.confirm=nil;self.name:ClearFocus();self.fontSize:ClearFocus();self.scaleEdit:ClearFocus();for _,d in ipairs(U.dropdowns or {}) do d:CloseMenu() end end)
+    self.cancel=self:Button(profiles,"Cancel",328,-294,260,function() self.confirm=nil;self:Refresh() end)
+    self.status=self:Label(content,"",20,0,580,11,{.8,.8,.8});self.status:ClearAllPoints();self.status:SetPoint("BOTTOMLEFT",content,"BOTTOMLEFT",20,5)
+    f:SetScript("OnHide",function() self:CloseColor();self.confirm=nil;self:CloseTransient() end)
     f:SetScript("OnShow",function()
         self:Refresh()
         -- Child templates can apply inherited fonts after the parent OnShow.
@@ -201,7 +246,7 @@ function O:Refresh(fontsReady)
     self:RefreshPlacement()
     self.strata.value=p.strata;self.strata:SetDefaultText(p.strata=="LOW" and "Low" or p.strata=="MEDIUM" and "Medium" or "High")
     self.optionsTab.activeLine:SetShown(not self.profilesSelected);self.profilesTab.activeLine:SetShown(self.profilesSelected==true)
-    self.optionsTab.text:SetTextColor(unpack(not self.profilesSelected and {.93,.94,.97} or gold));self.profilesTab.text:SetTextColor(unpack(self.profilesSelected and {.93,.94,.97} or gold))
+    self.optionsTab.text:SetTextColor(.93,.94,.97);self.profilesTab.text:SetTextColor(.93,.94,.97)
     self.order.value=p.routeOrder;self.order:SetDefaultText(p.routeOrder=="time" and "Estimated time" or "Distance")
     self.overlays:SetChecked(p.mapMarkers);self.minimapMarkers:SetChecked(p.minimapMarkers);self.locked:SetChecked(p.locked);self.active.value=c.profiles.active;self.active:SetDefaultText(c.profiles.active)
     self.copy.text:SetText(self.confirm=="copy" and "Confirm copy" or "Copy settings");self.reset.text:SetText(self.confirm=="reset" and "Confirm reset" or "Reset active profile");self.cancel:SetShown(self.confirm~=nil)
@@ -210,6 +255,7 @@ function O:Refresh(fontsReady)
     self:Layout();self.refreshing=false
 end
 function O:Page(profiles)
+    self:CloseTransient();self:Scroll(0)
     self.confirm=nil;self.profilesSelected=profiles==true;self.appearance:SetShown(not profiles);self.profilePage:SetShown(profiles);self:Refresh()
 end
 function O:Open()
@@ -217,13 +263,24 @@ function O:Open()
     self:Layout();self:Refresh();self.frame:Show()
 end
 function O:Layout()
-    self.frame:SetScale(math.min(1,(UIParent:GetHeight()-24)/dialogHeight,(UIParent:GetWidth()-24)/dialogWidth))
+    local scale=math.min(1,math.max(.1,(UIParent:GetWidth()-24)/dialogWidth))
+    local height=math.max(120,math.min(dialogHeight,(UIParent:GetHeight()-24)/scale))
+    local key=scale..":"..height..":"..UIParent:GetEffectiveScale()
+    if self.layoutKey and self.layoutKey~=key then self:CloseTransient() end
+    self.layoutKey=key;self.frame:SetScale(scale);self.frame:SetHeight(height)
+    local viewport=height-96
+    self.scroll:SetSize(bodyWidth,viewport);self.body:SetSize(bodyWidth,bodyHeight)
+    self.bar:SetHeight(math.max(22,viewport-8));self.maximum=math.max(0,bodyHeight-viewport)
+    self.scrolling=true;self.bar:SetMinMaxValues(0,self.maximum);self.bar:SetShown(self.maximum>0);self.scrolling=nil
+    self:Scroll(self.offset or 0)
     for _,entry in ipairs(self.bounded) do
         local t=entry.text;t:SetScale(1);t:SetHeight(0)
-        local natural=t:GetUnboundedStringWidth()+4;local height=t:GetStringHeight()+2
-        local scale=math.min(1,entry.width/math.max(1,natural),entry.height/math.max(1,height))
+        local effective=t:GetEffectiveScale()
+        local natural=(math.ceil(t:GetUnboundedStringWidth()*effective)+4)/effective;local height=(math.ceil(t:GetStringHeight()*effective)+2)/effective
+        local scale=entry.dropdown and 1 or math.min(1,entry.width/math.max(1,natural),entry.height/math.max(1,height))
         t:SetScale(scale);t:SetSize(entry.width/scale,entry.height/scale);t:ClearAllPoints()
         t:SetPoint(entry.point,entry.parent,entry.relative,entry.x/scale,entry.y/scale)
+        if entry.dropdown then self:Caption(entry.dropdown,entry.dropdown.fullCaption) end
     end
 end
 function O:Toggle() if self.frame:IsShown() then self.frame:Hide() else self:Open() end end

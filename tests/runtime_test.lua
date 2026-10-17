@@ -50,7 +50,12 @@ function methods:SetFrameLevel(v) self.level=v end
 function methods:SetFrameStrata(v) assert(v=='LOW' or v=='MEDIUM' or v=='HIGH' or v=='DIALOG' or v=='TOOLTIP');self.strata=v end
 function methods:GetFrameStrata() return self.strata or (self.parent and self.parent:GetFrameStrata()) or 'MEDIUM' end
 function methods:SetTexCoord(...) self.coords={...} end
-function methods:SetEnabled(v) self.enabled=v end
+function methods:IsEnabled() return self.enabled~=false end
+function methods:SetEnabled(v)
+    local changed=self:IsEnabled()~=v;self.enabled=v
+    local script=self.scripts[v and 'OnEnable' or 'OnDisable'];if changed and script then script(self) end
+end
+function methods:SetAlpha(v) self.alpha=v end
 function methods:SetBackdrop(v) self.backdrop=v end
 function methods:SetBackdropColor(...) self.backdropColor={...} end
 function methods:SetBackdropBorderColor(...) self.borderColor={...} end
@@ -76,6 +81,7 @@ function methods:SetJustifyH(value) self.justifyH=value end
 function methods:SetJustifyV(value) self.justifyV=value end
 function methods:SetMinMaxValues(a,b) self.minimum=a;self.maximum=b end
 function methods:SetValue(value) self.value=value;if self.scripts.OnValueChanged then self.scripts.OnValueChanged(self,value) end end
+function methods:GetValue() return self.value end
 function methods:SetValueStep(value) self.valueStep=value end
 function methods:SetObeyStepOnDrag(value) self.obeyStep=value end
 function methods:SetOrientation(value) self.orientation=value end
@@ -87,7 +93,9 @@ function methods:GetLeft() return 20 end
 function methods:GetTop() return 600 end
 function methods:SetTexture(v) self.texture=v;self.atlas=nil;return true end
 function methods:SetAtlas(v,useSize,filter,reset,wrapH,wrapV)
-    assert(useSize==false and reset==true and wrapH=='CLAMP' and wrapV=='CLAMP')
+    if v:match('^common%-search%-border%-') then
+        assert(v=='common-search-border-left' or v=='common-search-border-middle' or v=='common-search-border-right')
+    else assert(useSize==false and reset==true and wrapH=='CLAMP' and wrapV=='CLAMP') end
     self.atlas=v;self.texture='atlas sheet';self.coords={.1,.2,.3,.4}
     -- The native API returns nothing on success.
 end
@@ -98,7 +106,7 @@ function methods:SetTexelSnappingBias(v) self.snapBias=v end
 function methods:SetPushedTexture(v) self.pushedTexture=v end
 function methods:SetVertexColor(...) self.color={...} end
 function methods:SetRotation(v) self.rotation=v end
-function methods:SetDefaultText(v) self.label=v end
+function methods:SetDefaultText(v) self.label=v;if self.Text then self.Text:SetText(v) end end
 function methods:SetupMenu(fn) self.menu=fn end
 function methods:HasFocus() return self.focus==true end
 function methods:ClearFocus() self.focus=false end
@@ -107,7 +115,10 @@ function methods:SetChecked(v) self.checked=v end
 function methods:GetChecked() return self.checked end
 function methods:SetOwner(owner,anchor) self.tooltipOwner=owner;self.tooltipAnchor=anchor end
 function methods:GetOwner() return self.tooltipOwner end
-local noop={'SetAllPoints','SetShadowColor','SetShadowOffset','SetAutoFocus','SetMaxLetters','SetTextInsets','HighlightText','SetMovable','EnableMouse','SetClampedToScreen','RegisterForDrag','EnableMouseWheel','SetDrawLayer'}
+function methods:SetThumbTexture(path) self.thumb=self:CreateTexture();self.thumb:SetTexture(path) end
+function methods:GetThumbTexture() return self.thumb end
+function methods:SetClampedToScreen(value) self.clamped=value end
+local noop={'SetAllPoints','SetShadowColor','SetShadowOffset','SetAutoFocus','SetMaxLetters','SetTextInsets','HighlightText','SetMovable','EnableMouse','RegisterForDrag','EnableMouseWheel','SetDrawLayer'}
 for _,name in ipairs(noop) do methods[name]=function() end end
 function GetCursorPosition() return cursorX,cursorY end
 local function object(name)
@@ -123,7 +134,17 @@ function methods:CreateFontString() local text=object();text.parent=self;return 
 function CreateFont(name) return object(name) end
 function CreateFrame(kind,name,parent,template)
     local f=object(name);f.parent=parent;f.kind=kind;f.template=template
+    if template=='BackdropTemplate' then
+        -- Backdrop.xml inherits OnBackdropSizeChanged; replacing it leaves the
+        -- native border's texture coordinates at the previous frame size.
+        f:SetScript('OnSizeChanged',function() f.nativeBackdropSizes=(f.nativeBackdropSizes or 0)+1 end)
+    end
     if kind=='DropdownButton' or template=='UICheckButtonTemplate' then f.Text=object();f.Text.parent=f end
+    if template=='InputBoxTemplate' then
+        for _,key in ipairs({'Left','Middle','Right'}) do f[key]=f:CreateTexture() end
+    elseif template=='WowStyle1DropdownTemplate' then
+        f.Background=f:CreateTexture();f.Text:SetPoint('TOPLEFT',f,'TOPLEFT',9,-7)
+    end
     if template=='SharedTooltipTemplate' then
         f.TextLeft1=object();f.TextLeft1.parent=f;f.TextLeft1:SetFont('native',14,'');f:SetFrameStrata('TOOLTIP');f:Hide()
     end
@@ -158,7 +179,10 @@ C_Texture={GetAtlasInfo=function(name) if name=='gamepad-hud-icon-filter' then r
 Enum={PlayerInteractionType={Item=1,TradePartner=2,Gossip=3,QuestGiver=4,Merchant=5,TaxiNode=6,Trainer=7,Banker=8,Auctioneer=21,StableMaster=22,WorldMap=27}}
 C_TaxiMap={GetTaxiNodesForMap=function() return {{nodeID=1,faction=2,isUndiscovered=false},{nodeID=2,faction=2,isUndiscovered=true}} end}
 function TakeTaxiNode(slot) end
-function hooksecurefunc(name,fn) hooks[name]=fn end
+function hooksecurefunc(target,name,fn)
+    if type(target)=='string' then hooks[target]=name;return end
+    local original=target[name];target[name]=function(self,...) local result=original(self,...);fn(self,...);return result end
+end
 local N={};local files={}
 for line in io.lines(ROOT..'/AsTheCrowFlies/AsTheCrowFlies.toc') do if line:match('%.lua$') then files[#files+1]=line end end
 for _,name in ipairs(files) do assert(loadfile(ROOT..'/AsTheCrowFlies/'..name))('AsTheCrowFlies',N) end
@@ -585,10 +609,10 @@ test('native filter nested checkboxes support OR class defaults reset and repeat
     assert(d.kind=='DropdownButton' and icon:GetAtlas()=='gamepad-hud-icon-filter' and icon.desaturated)
     assert(icon:GetWidth()==18 and icon:GetHeight()==18 and d:GetWidth()==24 and d:GetHeight()==28 and not d.text:IsShown())
     assert(icon.color[1]==.75 and icon.color[2]==.75 and icon.color[3]==.75 and d.pushedTexture==d.nativePushed)
-    d.scripts.OnEnter();assert(d.bg.color[1]==d.hoverColor[1] and GameTooltip:GetText()=='Filter destinations')
-    d.menuOpen=true;d:TriggerEvent('OnMenuOpen');d.scripts.OnLeave();assert(d.bg.color[1]==d.hoverColor[1],'open menu retains its background after pointer leaves')
-    d:CloseMenu();assert(d.bg.color[1]==d.normalColor[1])
-    d.scripts.OnEnter();d.menuOpen=true;d:TriggerEvent('OnMenuOpen');d:CloseMenu();assert(d.bg.color[1]==d.hoverColor[1]);d.scripts.OnLeave()
+    d.scripts.OnEnter();assert(d.borderColor[1]==.9 and GameTooltip:GetText()=='Filter destinations')
+    d.menuOpen=true;d:TriggerEvent('OnMenuOpen');d.scripts.OnLeave();assert(d.borderColor[1]==.9,'open menu retains its hover edge after pointer leaves')
+    d:CloseMenu();assert(d.borderColor[1]==.45)
+    d.scripts.OnEnter();d.menuOpen=true;d:TriggerEvent('OnMenuOpen');d:CloseMenu();assert(d.borderColor[1]==.9);d.scripts.OnLeave()
     local classes=menu.children[3];assert(classes.label=='Class trainers' and classes.scroll==280 and #classes.children==10)
     classes.callback();flushSearch();assert(C.filter.categories.class and C.filter.classes.MAGE and classes.selected())
     menu.children[2].callback();flushSearch();assert(C.filter.categories.auction and C.filter.categories.class)
@@ -718,7 +742,6 @@ test('compact route controls pause resume and clear stale arrival dwell',functio
     local route=N.Routes.Summary({{mode='walk',start=p,finish=goal,distance=1000,quality='bearing'}},goal,C:Context())
     C.results={route};C.selected=1;C.origin=nil;C.matches=nil;C.destination=goal;C:Go()
     assert(C.compact and U.frame:GetHeight()<190 and U.pause.iconKind=='pause' and U.stop.iconKind=='close')
-    assert(U.stop.normalColor[1]>U.stop.normalColor[2]*3)
     C.nav.dwell=1;C.nav.previous=p;C.nav.previousTime=1;U.pause.scripts.OnClick()
     assert(C.manualPause and U.pause.iconKind=='play' and not C.nav.dwell and not C.nav.previous)
     U.pause.scripts.OnClick();assert(not C.manualPause and U.pause.iconKind=='pause')
@@ -729,11 +752,11 @@ test('late media registration refits options and custom text color leaves native
     local O=N.Options;local original=LibStub;local callbacks={};local available=false
     local lib={IsValid=function() return available end,Fetch=function() return 'late-wide.ttf' end,List=function() return {'Expressway'} end,
         RegisterCallback=function(_,event,fn) callbacks[event]=fn end}
-    local width=O.font.Text.GetUnboundedStringWidth;O.font.Text.GetUnboundedStringWidth=function() return available and 600 or 60 end
+    local width=O.font.Text.GetUnboundedStringWidth;O.font.Text.GetUnboundedStringWidth=function(self) return #(self:GetText())*(available and 40 or 6) end
     local color=N.Model.Copy(C.profile.colors.text);C.profile.colors.text={.2,.3,.4};C:ApplyProfile()
     assert(U.menuFont.textColor[1]==.93 and O.font.Text.textColor[1]~=.2)
     LibStub=function() return lib end;U:WatchFonts();available=true;callbacks.LibSharedMedia_Registered(nil,'font')
-    assert(O.font.Text:GetScale()<.5 and O.font.Text.font=='late-wide.ttf')
+    assert(O.font.Text:GetScale()==1 and O.font.Text.font=='late-wide.ttf' and O.font.Text:GetText():sub(-3)=='...')
     assert(U.eagle.color[1]==.88 and U.eagle.color[2]==.66 and U.settings.iconKind=='cog')
     O.font.Text.GetUnboundedStringWidth=width;LibStub=original;C.profile.colors.text=color;C:ApplyProfile()
 end)
@@ -824,7 +847,7 @@ end)
 test('first late SharedMedia library attachment refreshes and refits the complete options dialog',function()
     local O=N.Options;local previous,preference,watched=LibStub,C.profile.font,U.fontLibrary
     local measure=O.font.Text.GetUnboundedStringWidth;local callbacks={}
-    O.font.Text.GetUnboundedStringWidth=function(self) return self.font=='late-first.ttf' and 700 or 70 end
+    O.font.Text.GetUnboundedStringWidth=function(self) return #(self:GetText())*(self.font=='late-first.ttf' and 40 or 6) end
     LibStub=nil;U.fontLibrary=nil;C.profile.font='Expressway';C:ApplyProfile()
     assertOwnedFamily(STANDARD_TEXT_FONT);assert(O.font.Text:GetScale()==1)
     local lib={IsValid=function() return true end,Fetch=function() return 'late-first.ttf' end,List=function() return {'Expressway'} end,
@@ -833,7 +856,8 @@ test('first late SharedMedia library attachment refreshes and refits the complet
     -- registration callback will rescue a font-only attachment refresh.
     LibStub=function() return lib end;C.events.scripts.OnEvent(nil,'ADDON_LOADED','LateMediaProvider')
     assert(callbacks.LibSharedMedia_Registered and callbacks.LibSharedMedia_SetGlobal)
-    assertOwnedFamily('late-first.ttf');assert(O.font.Text:GetScale()<.4)
+    assertOwnedFamily('late-first.ttf');assert(O.font.Text:GetScale()==1 and O.font.Text:GetText()=='Ex...')
+    assert(O.font.value=='Expressway' and O.font.fullCaption=='Expressway')
     O.font.Text.GetUnboundedStringWidth=measure;LibStub=previous;C.profile.font=preference;U.fontLibrary=watched;C:ApplyProfile()
 end)
 
@@ -1337,8 +1361,8 @@ test('native icons keep atlas crops aspect ratio and font-independent pooled geo
     end
     assert(#frames==allocated and button.text:GetFont()==font,'repeated icon/scale changes allocate no frames or fonts')
     assert(button.pushedTexture==button.nativePushed and button.nativePushed.color[4]==.3)
-    U.handle.scripts.OnEnter();assert(U.handle.bg.color[1]==U.handle.hoverColor[1] and GameTooltip:GetText()=='Click to expand. Drag up or down to move.')
-    U.handle.scripts.OnLeave();assert(U.handle.bg.color[1]==U.handle.normalColor[1])
+    U.handle.scripts.OnEnter();assert(U.handle.borderColor[1]==.9 and GameTooltip:GetText()=='Click to expand. Drag up or down to move.')
+    U.handle.scripts.OnLeave();assert(U.handle.borderColor[1]==.45)
     button.scripts.OnClick();assert(clicks==1);C_Texture=old
 end)
 
@@ -1394,8 +1418,8 @@ test('search and route rows share one quiet measured tooltip without changing th
         assert(measured.path=='Fonts\\ARIALN.TTF' and measured.size==11 and measured.flags=='','native measurement uses the small regular font before population')
         assert(measured.width>0 and measured.wrap and measured.color[4]==1)
         assert(line.textColor[1]==.76 and line.textColor[2]==.78 and line.textColor[3]==.82)
-        assert(row.bg.color[1]==row.hoverColor[1]);row.scripts.OnLeave()
-        assert(not tip:IsShown() and not U.rowTooltipOwner and row.bg.color[1]==row.normalColor[1])
+        assert(row.borderColor[1]==.9);row.scripts.OnLeave()
+        assert(not tip:IsShown() and not U.rowTooltipOwner and row.borderColor[1]==(row.atcfSelected and .9 or .5))
     end
     C.destination=nil;C.results={};C.matches={goal};C.highlight=1;C:Refresh();checkRow()
     C.matches=nil;C.destination=goal;C.results={route};C.selected=1;C:Refresh();checkRow()
@@ -1941,14 +1965,137 @@ test('visibility survives build changes and invalid values default hidden withou
     assert(AsTheCrowFliesCharacter.version==99 and AsTheCrowFliesCharacter.hidden==true and AsTheCrowFliesCharacter.unknown=='keep')
     assert(AsTheCrowFliesDB.version==99 and AsTheCrowFliesDB.unknown=='profile' and AsTheCrowFliesProfiles.version==99)
 end)
-test('main panel uses QuestBrief search border while profile background remains configurable',function()
+test('FAU dialog chrome preserves profile backgrounds and saved visibility',function()
     local fresh=boot();local c,u=fresh.Core,fresh.UI;local f=u.frame;local b=f.backdrop
     assert(f.template=='BackdropTemplate' and b.edgeFile=='Interface\\DialogFrame\\UI-DialogBox-Border')
     assert(b.bgFile=='Interface\\Buttons\\WHITE8X8' and b.tile and b.tileSize==8 and b.edgeSize==16)
     for _,side in ipairs({'left','right','top','bottom'}) do assert(b.insets[side]==4) end
     assert(f.borderColor[1]==.65 and f.borderColor[2]==.65 and f.borderColor[3]==.65 and f.borderColor[4]==1)
+    local sizes=f.nativeBackdropSizes or 0;f.scripts.OnSizeChanged(f,400,250)
+    assert(f.nativeBackdropSizes==sizes+1,'panel resize must preserve the native backdrop handler')
     c.profile.colors.background={.2,.3,.4};c:ApplyProfile()
-    assert(f.backdropColor[1]==.2 and f.backdropColor[2]==.3 and f.backdropColor[3]==.4 and f.backdropColor[4]==.97)
+    assert(f.backdropColor[1]==.2 and f.backdropColor[2]==.3 and f.backdropColor[3]==.4 and f.backdropColor[4]==.94)
+    assert(u.menu.backdropColor[1]==.2 and fresh.Options.frame.backdropColor[1]==.045,'options retain FAU chrome independently of the island color')
     assert(c.hidden and not f:IsShown(),'appearance must respect visibility')
+end)
+test('button hover survives tooltip updates and releases on disable hide and menu close',function()
+    local fresh=boot();local c,u=fresh.Core,fresh.UI;local button=u.pause
+    c:ShowPanel(true);button:Show();button.scripts.OnEnter();assert(button.borderColor[1]==.9)
+    local enter=button.scripts.OnEnter
+    for _=1,20 do u:PauseIcon(c) end
+    assert(button.scripts.OnEnter==enter,'guidance updates must not accumulate tooltip hooks')
+    button:SetEnabled(false);assert(button.alpha==.5 and button.borderColor[1]==.45)
+    button:SetEnabled(true);assert(button.alpha==1 and button.borderColor[1]==.9)
+    button:Hide();button:Show();assert(button.borderColor[1]==.45 and not GameTooltip:IsShown())
+    c.tucked=true;u:Layout(c);u.handle.scripts.OnEnter();assert(u.handle.borderColor[1]==.9)
+    c.tucked=false;u:Layout(c);c.tucked=true;u:Layout(c)
+    assert(u.handle.borderColor[1]==.45,'tucking again must not retain the previous hover')
+    local o=fresh.Options;o:Open();o.font.menuOpen=true;o:Page(true)
+    assert(not o.font:IsMenuOpen(),'switching pages dismisses dropdowns owned by the hidden page')
+end)
+
+test('selection remains distinct from hover through search and route refreshes',function()
+    local fresh=boot();local c,u=fresh.Core,fresh.UI;c:ShowPanel(true)
+    local point=fresh.Adapter.Position();point.name='First';point.id='first';point.category='place'
+    local other=fresh.Model.Copy(point);other.name='Second';other.id='second'
+    c.matches={point,other};c.highlight=1;c:Refresh()
+    local first,second=u.rows[1],u.rows[2]
+    second.scripts.OnEnter();assert(first.atcfSelected and not second.atcfSelected)
+    assert(first.backdropColor[1]~=second.backdropColor[1],'hover must not look selected')
+    first.scripts.OnEnter();first.scripts.OnLeave();c:Refresh()
+    assert(first.backdropColor[1]~=second.backdropColor[1],'refresh must retain selection fill')
+    c.highlight=2;c:Refresh();assert(first.backdropColor[1]~=second.backdropColor[1] and second.atcfSelected)
+    second.scripts.OnLeave();second:Hide();second:Show();assert(second.atcfSelected and second.backdropColor[1]~=first.backdropColor[1])
+    local route=fresh.Routes.Summary({{mode='walk',start=point,finish=other,distance=50,seconds=10}},other,c:Context())
+    c.matches=nil;c.results={route,route};c.selected=1;c:Refresh();second.scripts.OnEnter()
+    assert(first.atcfSelected and not second.atcfSelected and first.backdropColor[1]~=second.backdropColor[1])
+end)
+test('navigation menu stays on screen at bottom edges and follows layout changes',function()
+    local fresh=boot();local c,u=fresh.Core,fresh.UI;c:ShowPanel(true)
+    -- Resolve the actual panel anchor in its local coordinates, not a fixed mock top.
+    u.frame.GetTop=function(frame) return UIParent:GetHeight()/frame:GetScale()+frame.point[5] end
+    for _,screen in ipairs({{1920,1080},{960,360}}) do
+        UIParent:SetSize(unpack(screen))
+        for _,uiScale in ipairs({.85,1}) do
+            UIParent:SetScale(uiScale)
+            for _,panelScale in ipairs({.5,1,1.6}) do
+                c.profile.scale=panelScale
+                for _,side in ipairs({'none','left','right'}) do
+                    c.profile.dock=side;c.profile.dockPosition=1;c.profile.y=-10000;c.tucked=false;c:Refresh()
+                    u.menu:Hide();u.settings.scripts.OnClick();assert(u.menu:IsShown() and u.menu.clamped)
+                    local top=u.frame:GetTop()+u.menu.point[5]
+                    local available=UIParent:GetHeight()/u.frame:GetScale()
+                    assert(top<=available and top-u.menu:GetHeight()>=0,'all menu actions must remain on-screen')
+                    c.profile.dock='none';c.profile.y=0;c:Refresh()
+                    assert(u.menu.point[5]==-40,'normal placement must recover while the menu stays open')
+                end
+            end
+        end
+    end
+    UIParent:SetScale(1);UIParent:SetSize(1920,1080)
+end)
+test('short options preserve type size and expose every control through scroll navigation',function()
+    local fresh=boot();local c,o=fresh.Core,fresh.Options
+    UIParent:SetSize(960,360);o:Open()
+    assert(o.frame:GetScale()==1 and o.frame:GetHeight()==336 and o.font.Text:GetScale()==1)
+    assert(o.font.Text.fontSize==12 and o.optionsTab:GetHeight()==22 and o.scroll:GetHeight()==240)
+    assert(o.maximum==164 and o.bar:IsShown() and o.bar.orientation=='VERTICAL')
+    assert(o.font.parent==o.appearance and o.appearance.parent==o.body and o.body.parent==o.scroll)
+    local barLeft=o.frame:GetWidth()+o.bar.point[2]-o.bar:GetWidth()
+    assert(barLeft>o.scroll:GetWidth(),'scrollbar must have its own column beyond page content')
+    local framesBefore=#frames
+    o.font.menuOpen=true;o.fontSize:SetFocus();o.scroll.scripts.OnMouseWheel(nil,-1)
+    assert(o.offset==28 and o.scroll:GetVerticalScroll()==28 and not o.font:IsMenuOpen() and not o.fontSize:HasFocus())
+    o.bar:SetValue(10000);assert(o.offset==o.maximum and o.bar:GetValue()==o.maximum)
+    -- The lowest appearance action remains within the viewport at maximum scroll.
+    local actionBottom=-o.hidePanel.point[3]+o.hidePanel:GetHeight()-o.offset
+    assert(actionBottom<=o.scroll:GetHeight() and actionBottom>0)
+    o:Page(true);assert(o.offset==0 and o.profilePage:IsShown())
+    o.name:SetFocus();o.active.menuOpen=true;o:Page(false)
+    assert(not o.name:HasFocus() and not o.active:IsMenuOpen())
+    o:Scroll(o.maximum);o.fontSize:SetFocus();o.font.menuOpen=true
+    UIParent:SetSize(1920,1080);o.frame.scripts.OnEvent(nil,'DISPLAY_SIZE_CHANGED')
+    assert(o.offset==0 and o.maximum==0 and not o.bar:IsShown() and o.frame:GetHeight()==500)
+    assert(not o.fontSize:HasFocus() and not o.font:IsMenuOpen())
+    for _=1,10 do o:Page(true);o:Page(false);o:Layout();o:Open() end
+    assert(#frames==framesBefore,'layout and reopening must reuse controls')
+    o.frame:Hide();o:Open();assert(o.frame:GetScale()==1 and o.scroll:GetVerticalScroll()==0)
+    for _,screen in ipairs({{960,360},{600,400},{1920,1080}}) do
+        UIParent:SetSize(unpack(screen))
+        for _,scale in ipairs({.85,.9,1}) do
+            UIParent:SetScale(scale);o:Layout();o:Scroll(o.maximum)
+            assert(o.frame:GetWidth()*o.frame:GetScale()<=screen[1]-24+.001)
+            assert(o.frame:GetHeight()*o.frame:GetScale()<=screen[2]-24+.001)
+            assert(-o.hidePanel.point[3]+o.hidePanel:GetHeight()-o.offset<=o.scroll:GetHeight())
+            assert(o.font.Text:GetScale()==1,'captions must not shrink independently at fractional UI scales')
+        end
+    end
+    UIParent:SetScale(1);UIParent:SetSize(1920,1080)
+end)
+test('dropdown captions retain readable UTF8 text and complete selected identities',function()
+    local fresh=boot();local c,o=fresh.Core,fresh.Options;o:Open()
+    for _,uiScale in ipairs({.75,.85,.9,1,1.25}) do
+        UIParent:SetScale(uiScale)
+        for _,name in ipairs({string.rep('W',48),string.rep('界',16),string.rep('W',128)}) do
+            o.font.value=name;o.font:SetDefaultText(name);o:Layout()
+            local caption=o.font.Text:GetText()
+            assert(o.font.value==name and o.font.fullCaption==name and o.font.Text:GetScale()==1)
+            assert(caption:sub(-3)=='...' and #caption<#name)
+            assert(caption:sub(1,-4)==name:sub(1,#caption-3),'caption must be a prefix')
+            if name:sub(1,3)=='界' then assert((#caption-3)%3==0,'do not split UTF8 codepoints') end
+            local t=o.font.Text;local scale=t:GetEffectiveScale()
+            assert((math.ceil(t:GetUnboundedStringWidth()*scale)+4)/scale<=t:GetWidth(),'caption must clear the dropdown arrow')
+            o.font.scripts.OnEnter();assert(GameTooltip:GetOwner()==o.font and GameTooltip:GetText()==name)
+            o.font.scripts.OnLeave();assert(not GameTooltip:IsShown())
+            -- Native menu generation can write the full caption after layout.
+            o.font.Text:SetText(name);assert(o.font.Text:GetText()==caption and o.font.fullCaption==name)
+        end
+    end
+    UIParent:SetScale(1)
+    local name=string.rep('P',48);assert(o:ProfileAction('DuplicateProfile',name))
+    assert(c.profiles.active==name and o.active.value==name and o.active.fullCaption==name)
+    assert(o.active.Text:GetScale()==1 and o.active.Text:GetText():sub(-3)=='...')
+    assert(o:ProfileAction('SwitchProfile','Default'));assert(o.active.Text:GetText()=='Default')
+    o.font:SetDefaultText('Arial');o:Layout();assert(o.font.Text:GetText()=='Arial' and not o.font.truncatedCaption)
 end)
 print('PASS runtime scenarios: '..count..'; frames allocated='..#frames)

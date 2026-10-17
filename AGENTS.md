@@ -27,6 +27,6 @@ Run commands from the repository root. CI uses Python 3.12. If the Lua test depe
 
 ## UI and delivery
 
-- Match the established XPIsland-style options and reuse shared font, layout and native-icon helpers. Check changed layouts at supported widths, font sizes and scales; size controls from measured text.
+- Use FindAnUpgrade as the window design standard: shared dialog borders, dark tooltip-bordered buttons with gold hover edges, native search-field artwork and centered dropdown labels. Reuse shared chrome, font, layout and native-icon helpers. Check changed layouts at supported widths, font sizes and scales; size controls from measured text.
 - For installation work, preserve SavedVariables, unrelated addons and backups, and verify installed files against the built package.
 - For release work, follow [RELEASING.md](docs/RELEASING.md). Merging does not publish: the workflow needs an annotated version tag whose commit is reachable from `origin/main`, matching the TOC and release notes. Keep published tags/assets immutable and reconcile unresolved CurseForge upload markers before retrying.
