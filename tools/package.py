@@ -39,7 +39,11 @@ def build(root=ROOT, local_data=False, release=False):
                if line.strip() and not line.startswith('#')]
     if len(set(members)) != len(members):
         raise ValueError('Duplicate TOC file')
-    expected = {'AsTheCrowFlies.toc', *members, *(f'Media/{name}.tga' for name in MEDIA)}
+    # The client loads the conventional Bindings.xml separately. Listing it
+    # in the TOC sends Binding elements to the ordinary UI XML parser.
+    if 'Bindings.xml' in members:
+        raise ValueError('Bindings.xml is loaded automatically and must not be listed in the TOC')
+    expected = {'AsTheCrowFlies.toc', 'Bindings.xml', *members, *(f'Media/{name}.tga' for name in MEDIA)}
     for name in expected:
         if Path(name).is_absolute() or '\\' in name or '..' in Path(name).parts:
             raise ValueError('Unsafe addon path')

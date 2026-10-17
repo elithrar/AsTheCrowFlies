@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import xml.etree.ElementTree as ET
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -21,8 +22,8 @@ VERSION = re.search(r'^## Version: (.+)$',
 TAXI_SHA256 = 'e74250e6ed1ea8cf69e3869e161135bb1bbba195ba794f5e0ccd78fc30320db7'
 TOC_FILES = ['Model.lua', 'Settings.lua', 'Data/Registry.lua', 'Data/Taxi.lua',
              'Routes.lua', 'Navigation.lua', 'Adapter.lua', 'Providers.lua',
-             'UI.lua', 'Overlay.lua', 'Options.lua', 'Core.lua', 'Bindings.xml']
-RUNTIME_FILES = {'AsTheCrowFlies.toc', *TOC_FILES,
+             'UI.lua', 'Overlay.lua', 'Options.lua', 'Core.lua']
+RUNTIME_FILES = {'AsTheCrowFlies.toc', 'Bindings.xml', *TOC_FILES,
                  'Media/eagle.tga', 'Media/arrow.tga', 'Media/surface.tga', 'Media/cog.tga'}
 
 
@@ -80,12 +81,28 @@ class Packages(unittest.TestCase):
             self.assertIn('## Version: ' + VERSION, toc)
             self.assertIn('## X-Curse-Project-ID: 1739133', toc)
             self.assertEqual([line for line in toc if line and not line.startswith('#')], TOC_FILES)
+            bindings = ET.fromstring(archive.read('AsTheCrowFlies/Bindings.xml'))
+            self.assertEqual(bindings.tag, 'Bindings')
+            toggle = bindings.find("Binding[@name='ASTHECROWFLIES_TOGGLE']")
+            self.assertIsNotNone(toggle)
+            self.assertEqual(toggle.get('header'), 'ASTHECROWFLIES')
+            self.assertEqual(toggle.text.strip(), 'AsTheCrowFlies_Toggle()')
             taxi = archive.read('AsTheCrowFlies/Data/Taxi.lua')
             self.assertEqual(digest(taxi), TAXI_SHA256)
             self.assertEqual(len(taxi), 349728)
             self.assertIn(b'N.Data.LocalTaxi=', taxi)
             self.assertEqual(taxi.count(b'["category"]="flight"'), 98)
             self.assertEqual(taxi.count(b'["mode"]="flight"'), 294)
+
+    def test_bindings_cannot_be_loaded_as_ordinary_toc_xml(self):
+        with fixture() as root:
+            toc = root / 'AsTheCrowFlies/AsTheCrowFlies.toc'
+            lines = [line for line in toc.read_text().splitlines() if line != 'Bindings.xml']
+            toc.write_text('\n'.join([*lines, 'Bindings.xml', '']))
+            for release in (False, True):
+                with self.subTest(release=release):
+                    with self.assertRaisesRegex(ValueError, 'Bindings.xml.*automatically'):
+                        self.builder.build(root=root, release=release)
 
     def test_reproducible_full_data_development_packages(self):
         for local in ((False,) if SOURCE_ONLY else (False, True)):
