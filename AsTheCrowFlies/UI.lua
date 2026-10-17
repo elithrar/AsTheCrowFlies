@@ -1,6 +1,49 @@
 local _,N=...;local M=N.Model;local U={texts={}};N.UI=U
 local MEDIA="Interface\\AddOns\\AsTheCrowFlies\\Media\\"
 local gold={1,.82,0};local ink={.93,.94,.97}
+-- FindAnUpgrade's dialog, option-button and search-card chrome. Keep these
+-- shared by the island and options so their interaction states stay consistent.
+local controlBackdrop={bgFile="Interface\\Buttons\\WHITE8X8",edgeFile="Interface\\Tooltips\\UI-Tooltip-Border",tile=true,tileSize=8,edgeSize=10,insets={left=2,right=2,top=2,bottom=2}}
+local dialogBackdrop={bgFile="Interface\\Buttons\\WHITE8X8",edgeFile="Interface\\DialogFrame\\UI-DialogBox-Border",tile=true,tileSize=8,edgeSize=16,insets={left=4,right=4,top=4,bottom=4}}
+local buttonStyle={fill={.06,.06,.065,.8},border={.45,.45,.45,.65},hover={.9,.8,.5,.9}}
+local cardStyle={selected={.16,.14,.075,.96},fill={.045,.045,.05,.96},border={.5,.5,.5,.8},hover={.9,.8,.5,.9}}
+function U:Dialog(frame,profileBackground)
+    frame:SetBackdrop(dialogBackdrop);frame:SetBackdropColor(.045,.045,.05,.94);frame:SetBackdropBorderColor(.65,.65,.65,1)
+    if profileBackground then self.profileDialogs=self.profileDialogs or {};self.profileDialogs[#self.profileDialogs+1]=frame end
+end
+function U:Section(frame)
+    frame:SetBackdrop(controlBackdrop);frame:SetBackdropColor(.035,.035,.04,.35);frame:SetBackdropBorderColor(.35,.35,.35,.5)
+end
+function U:RefreshButton(button)
+    local style=button.atcfStyle
+    local enabled=button:IsEnabled()
+    local active=enabled and (button.atcfHovered or button.atcfSelected or button.IsMenuOpen and button:IsMenuOpen())
+    button:SetBackdropColor(unpack(enabled and button.atcfSelected and style.selected or style.fill))
+    button:SetBackdropBorderColor(unpack(active and style.hover or style.border))
+    button:SetAlpha(enabled and 1 or .5)
+end
+function U:StyleButton(button,card)
+    button.atcfStyle=card and cardStyle or buttonStyle;button:SetBackdrop(controlBackdrop)
+    button:HookScript("OnEnter",function() button.atcfHovered=true;self:RefreshButton(button) end)
+    button:HookScript("OnLeave",function() button.atcfHovered=nil;self:RefreshButton(button) end)
+    button:HookScript("OnHide",function() button.atcfHovered=nil;self:RefreshButton(button) end)
+    button:HookScript("OnEnable",function() self:RefreshButton(button) end)
+    button:HookScript("OnDisable",function() self:RefreshButton(button) end)
+    self:RefreshButton(button)
+end
+function U:ControlArt(frame)
+    -- FAU's search inputs and dropdowns align the native border to the control,
+    -- replacing the dropdown template's padded background without its scripts.
+    if frame.Background then frame.Background:Hide() end
+    for _,key in ipairs({"Left","Middle","Right"}) do
+        local region=frame[key] or frame:CreateTexture(nil,"BACKGROUND");frame[key]=region
+        region:SetAtlas("common-search-border-"..key:lower());region:ClearAllPoints()
+        if key~="Middle" then region:SetWidth(8) end
+    end
+    frame.Left:SetPoint("TOPLEFT",frame,"TOPLEFT",0,0);frame.Left:SetPoint("BOTTOMLEFT",frame,"BOTTOMLEFT",0,0)
+    frame.Right:SetPoint("TOPRIGHT",frame,"TOPRIGHT",0,0);frame.Right:SetPoint("BOTTOMRIGHT",frame,"BOTTOMRIGHT",0,0)
+    frame.Middle:SetPoint("TOPLEFT",frame.Left,"TOPRIGHT",0,0);frame.Middle:SetPoint("BOTTOMRIGHT",frame.Right,"BOTTOMLEFT",0,0)
+end
 -- One checked family for all owned text, including native option controls.
 -- Native font heights are uiUnits: cache their readback, not an exact size echo.
 U.fontRevision=0
@@ -109,26 +152,11 @@ function U:Text(parent,text,size,x,y,width,height)
     t:SetJustifyH("LEFT");t:SetJustifyV("MIDDLE");t:SetTextColor(unpack(ink));t:SetShadowColor(0,0,0,.65);t:SetShadowOffset(1,-1);t:SetWordWrap(false);t:SetText(text or "")
     self.inkTexts=self.inkTexts or {};self.inkTexts[#self.inkTexts+1]=t;return t
 end
-function U:Surface(f,color)
-    local pieces={};local radius=6;local crop=18/256
-    local function texture() local t=f:CreateTexture(nil,"BACKGROUND");pieces[#pieces+1]=t;return t end
-    for _,corner in ipairs({{"TOPLEFT",0,crop,0,crop},{"TOPRIGHT",1-crop,1,0,crop},{"BOTTOMLEFT",0,crop,1-crop,1},{"BOTTOMRIGHT",1-crop,1,1-crop,1}}) do
-        local t=texture();t:SetTexture(MEDIA.."surface.tga");t:SetTexCoord(corner[2],corner[3],corner[4],corner[5]);t:SetPoint(corner[1],f,corner[1],0,0);t:SetSize(radius,radius)
-    end
-    local center=texture();center:SetColorTexture(1,1,1,1);center:SetPoint("TOPLEFT",f,"TOPLEFT",radius,0);center:SetPoint("BOTTOMRIGHT",f,"BOTTOMRIGHT",-radius,0)
-    local left=texture();left:SetColorTexture(1,1,1,1);left:SetPoint("TOPLEFT",f,"TOPLEFT",0,-radius);left:SetPoint("BOTTOMLEFT",f,"BOTTOMLEFT",0,radius);left:SetWidth(radius)
-    local right=texture();right:SetColorTexture(1,1,1,1);right:SetPoint("TOPRIGHT",f,"TOPRIGHT",0,-radius);right:SetPoint("BOTTOMRIGHT",f,"BOTTOMRIGHT",0,radius);right:SetWidth(radius)
-    local surface={pieces=pieces};function surface:SetVertexColor(...) for _,t in ipairs(self.pieces) do t:SetVertexColor(...) end end
-    surface:SetVertexColor(unpack(color or {.045,.048,.062,.97}))
-    if not color then self.backgrounds=self.backgrounds or {};self.backgrounds[#self.backgrounds+1]=surface end
-    return surface
-end
 function U:ApplyAppearance()
     self:HideRowTip()
     local colors=self.owner.profile.colors
     if not colors then return end
-    self.frame:SetBackdropColor(colors.background[1],colors.background[2],colors.background[3],.97)
-    for _,surface in ipairs(self.backgrounds or {}) do surface:SetVertexColor(colors.background[1],colors.background[2],colors.background[3],.97) end
+    for _,frame in ipairs(self.profileDialogs or {}) do frame:SetBackdropColor(colors.background[1],colors.background[2],colors.background[3],.94) end
     for _,entry in ipairs(self.texts) do if not entry[1].atcfOptions and not entry[1].atcfTooltip then entry[1]:SetTextColor(unpack(colors.text)) end end
     for _,row in ipairs(self.rows or {}) do row.name:SetTextColor(1,.82,0);row.lockedText:SetTextColor(.95,.25,.25) end
     if self.destinationName then self.destinationName:SetTextColor(1,.82,0) end
@@ -136,23 +164,19 @@ function U:ApplyAppearance()
     if self.eagle then self.eagle:SetVertexColor(.88,.66,.16) end
     if self.arrow then self.arrow:SetVertexColor(unpack(gold)) end
 end
-function U:Rectangle(f,color)
-    local texture=f:CreateTexture(nil,"BACKGROUND");texture:SetAllPoints(f);texture:SetColorTexture(1,1,1,1)
-    texture:SetVertexColor(unpack(color or {.045,.048,.062,.97}))
-    if not color then self.backgrounds=self.backgrounds or {};self.backgrounds[#self.backgrounds+1]=texture end
-    return texture
-end
-function U:Button(parent,label,x,y,w,h,callback)
-    local b=CreateFrame("Button",nil,parent);b:SetPoint("TOPLEFT",x,y);b:SetSize(w,h or 28)
+function U:Button(parent,label,x,y,w,h,callback,card)
+    local b=CreateFrame("Button",nil,parent,"BackdropTemplate");b:SetPoint("TOPLEFT",x,y);b:SetSize(w,h or 28)
     local inset=w<40 and 2 or 8
-    b.bg=self:Rectangle(b,{.13,.14,.17,1});b.text=self:Text(b,label,12,inset,0,w-inset*2,h or 28);b.text:SetJustifyH("CENTER")
-    b.normalColor={.13,.14,.17,1};b.hoverColor={.22,.24,.28,1}
-    b:SetScript("OnClick",callback);b:SetScript("OnEnter",function() b.bg:SetVertexColor(unpack(b.hoverColor)) end);b:SetScript("OnLeave",function() b.bg:SetVertexColor(unpack(b.normalColor)) end)
+    self:StyleButton(b,card);b.text=self:Text(b,label,12,inset,0,w-inset*2,h or 28);b.text:SetJustifyH("CENTER")
+    b:SetScript("OnClick",callback)
     return b
 end
 function U:Tip(frame,text)
-    frame:SetScript("OnEnter",function() if frame.bg then frame.bg:SetVertexColor(unpack(frame.hoverColor)) end;GameTooltip:SetOwner(frame,"ANCHOR_RIGHT");GameTooltip:SetText(text,nil,nil,nil,nil,true);GameTooltip:Show() end)
-    frame:SetScript("OnLeave",function() if frame.bg then frame.bg:SetVertexColor(unpack(frame.normalColor)) end;GameTooltip:Hide() end)
+    frame.atcfTip=text
+    if frame.atcfTipHooked then return end;frame.atcfTipHooked=true
+    frame:HookScript("OnEnter",function() GameTooltip:SetOwner(frame,"ANCHOR_RIGHT");GameTooltip:SetText(frame.atcfTip,nil,nil,nil,nil,true);GameTooltip:Show() end)
+    local function hide() if GameTooltip:GetOwner()==frame then GameTooltip:Hide() end end
+    frame:HookScript("OnLeave",hide);frame:HookScript("OnHide",hide)
 end
 function U:HideRowTip(frame)
     if self.rowTooltip and (not frame or self.rowTooltipOwner==frame) then
@@ -172,12 +196,11 @@ function U:ShowRowTip(frame)
     tip:SetText("Travel time may vary based on terrain.",.76,.78,.82,1,true);tip:Show()
 end
 function U:RowTip(frame)
-    frame:SetScript("OnEnter",function() frame.bg:SetVertexColor(unpack(frame.hoverColor));self:ShowRowTip(frame) end)
-    frame:SetScript("OnLeave",function() frame.bg:SetVertexColor(unpack(frame.normalColor));self:HideRowTip(frame) end)
+    frame:HookScript("OnEnter",function() self:ShowRowTip(frame) end)
+    frame:HookScript("OnLeave",function() self:HideRowTip(frame) end)
     frame:HookScript("OnHide",function() self:HideRowTip(frame) end)
     frame:HookScript("OnMouseDown",function() self:HideRowTip(frame) end)
 end
-function U:ButtonColor(b,normal,hover) b.normalColor=normal;b.hoverColor=hover;b.bg:SetVertexColor(unpack(normal)) end
 -- Use the client's control artwork, independent of the selected font. Atlas
 -- dimensions describe the glyph; the 20px holder remains the alignment box.
 local nativeIcons={
@@ -381,11 +404,11 @@ function U:ScrollIndicator(offset)
     self.scrollThumb:ClearAllPoints();self.scrollThumb:SetPoint("TOPLEFT",self.scrollRail,"TOPLEFT",0,-math.min(range,math.max(0,offset or 0))/range*(visible-height))
 end
 function U:Menu(parent,x,y,w,label,entries,choose)
-    local d=CreateFrame("DropdownButton",nil,parent,"WowStyle1DropdownTemplate");d:SetPoint("TOPLEFT",x,y);d:SetSize(w,28);d:SetDefaultText(label)
+    local d=CreateFrame("DropdownButton",nil,parent,"WowStyle1DropdownTemplate");d:SetPoint("TOPLEFT",x,y);d:SetSize(w,24);d:SetDefaultText(label)
     if not self.menuFont then self.menuFont=CreateFont("AsTheCrowFliesMenuFont");self.menuFont.atcfFixedFont=true;self.menuFont.atcfOptions=true;self:Font(self.menuFont,12);self.menuFont:SetTextColor(unpack(ink)) end
-    if d.Text then self:Font(d.Text,12);d.Text:ClearAllPoints();d.Text:SetPoint("LEFT",d,"LEFT",9,0);d.Text:SetSize(w-36,28);d.Text:SetJustifyH("LEFT");d.Text:SetJustifyV("MIDDLE");d.Text:SetWordWrap(false) end
+    if d.Text then self:Font(d.Text,12);d.Text:ClearAllPoints();d.Text:SetPoint("LEFT",d,"LEFT",9,0);d.Text:SetSize(w-31,24);d.Text:SetJustifyH("LEFT");d.Text:SetJustifyV("MIDDLE");d.Text:SetWordWrap(false) end
     d:SetupMenu(function(_,root)
-        root:SetScrollMode(280)
+        root:SetScrollMode(220)
         for _,entry in ipairs(entries()) do
             local row=root:CreateRadio(entry.label,function() return d.value==entry.value end,function() d.value=entry.value;d:SetDefaultText(entry.label);choose(entry.value) end)
             row:AddInitializer(function(button) button.fontString:SetFontObject(self.menuFont) end)
@@ -396,13 +419,13 @@ end
 function U:RefreshFilter(c)
     local d=self.filterButton;local tint=M.HasFilter(c.filter) and {1,.82,0} or {.75,.75,.75}
     d.icons.filter.texture:SetVertexColor(tint[1],tint[2],tint[3],1);d.text:SetTextColor(unpack(tint))
-    d.bg:SetVertexColor(unpack((d.atcfHovered or d:IsMenuOpen()) and d.hoverColor or d.normalColor))
+    self:RefreshButton(d)
 end
 function U:FilterMenu(parent,c)
     -- The intrinsic DropdownButton owns mouse dismissal, Escape and menu input.
-    local d=CreateFrame("DropdownButton",nil,parent);self.filterButton=d
+    local d=CreateFrame("DropdownButton",nil,parent,"BackdropTemplate");self.filterButton=d
     d:SetPoint("TOPLEFT",c.profile.width-38,-42);d:SetSize(24,28)
-    d.bg=self:Rectangle(d,{.13,.14,.17,1});d.normalColor={.13,.14,.17,1};d.hoverColor={.22,.24,.28,1}
+    self:StyleButton(d)
     d.text=self:Text(d,"F",12,0,0,24,28);d.text:SetJustifyH("CENTER");self:Icon(d,"filter")
     if not self.menuFont then self.menuFont=CreateFont("AsTheCrowFliesMenuFont");self.menuFont.atcfFixedFont=true;self.menuFont.atcfOptions=true;self:Font(self.menuFont,12);self.menuFont:SetTextColor(unpack(ink)) end
     d:SetupMenu(function(_,root)
@@ -428,8 +451,6 @@ function U:FilterMenu(parent,c)
     end)
     d:HookScript("OnMouseDown",function() self.from:ClearFocus();self.to:ClearFocus() end)
     self:Tip(d,"Filter destinations")
-    d:HookScript("OnEnter",function() d.atcfHovered=true;self:RefreshFilter(c) end)
-    d:HookScript("OnLeave",function() d.atcfHovered=false;self:RefreshFilter(c) end)
     d:RegisterCallback("OnMenuOpen",function() self:RefreshFilter(c) end,self)
     d:RegisterCallback("OnMenuClose",function() self:RefreshFilter(c) end,self)
     self.dropdowns=self.dropdowns or {};self.dropdowns[#self.dropdowns+1]=d
@@ -438,8 +459,8 @@ end
 function U:Edit(parent,label,y,origin)
     local caption=self:Text(parent,label,12,14,y,44,32);caption:SetTextColor(.65,.68,.73)
     self.fieldLabels=self.fieldLabels or {};self.fieldLabels[#self.fieldLabels+1]=caption
-    local e=CreateFrame("EditBox",nil,parent);e:SetPoint("TOPLEFT",62,y);e:SetSize(self.owner.profile.width-104,32);e:SetAutoFocus(false);e:SetMaxLetters(100)
-    self:Surface(e,{.09,.10,.125,1});self:Font(e,13);e:SetTextInsets(8,8,0,0)
+    local e=CreateFrame("EditBox",nil,parent,"InputBoxTemplate");e:SetPoint("TOPLEFT",62,y);e:SetSize(self.owner.profile.width-104,32);e:SetAutoFocus(false);e:SetMaxLetters(100)
+    self:ControlArt(e);self:Font(e,13);e:SetTextInsets(8,8,0,0);e:SetJustifyV("MIDDLE")
     e:SetScript("OnTextChanged",function(_,user)
         if user then
             self.owner:Edit(true)
@@ -462,9 +483,7 @@ end
 function U:Create(c)
     self.owner=c;local f=CreateFrame("Frame","AsTheCrowFliesPanel",UIParent,"BackdropTemplate");self.frame=f;f:Hide()
     f:SetMovable(true);f:SetResizable(true);f:EnableMouse(true);f:SetClampedToScreen(true);f:SetFrameStrata(c.profile.strata);f:SetFrameLevel(100)
-    -- Match QuestBrief's search frame; retain this profile's background color.
-    f:SetBackdrop({bgFile="Interface\\Buttons\\WHITE8X8",edgeFile="Interface\\DialogFrame\\UI-DialogBox-Border",tile=true,tileSize=8,edgeSize=16,insets={left=4,right=4,top=4,bottom=4}})
-    f:SetBackdropBorderColor(.65,.65,.65,1)
+    self:Dialog(f,true)
     local header=CreateFrame("Frame",nil,f);self.header=header;header:SetPoint("TOPLEFT");header:SetSize(c.profile.width-78,44);header:EnableMouse(true);header:RegisterForDrag("LeftButton")
     header:SetScript("OnDragStart",function()
         if c.profile.locked or c.hidden or c.tucked or self.resizing then return end
@@ -505,6 +524,7 @@ function U:Create(c)
     self.sortLabel=self:Text(self.routeHeading,"Sort",11,0,0,36,24)
     self.routeOrder=self:Menu(self.routeHeading,38,0,c.profile.width-66,"Distance",function() return {{label="Distance",value="distance"},{label="Estimated time",value="time"}} end,function(value) c:SetRouteOrder(value) end)
     self.routeOrder:SetHeight(24)
+    self:ControlArt(self.routeOrder)
     if self.routeOrder.Text then self.routeOrder.Text.atcfFixedFont=true;self:Font(self.routeOrder.Text,12);self.routeOrder.Text:SetHeight(24) end
     self.resultsBoundary=f:CreateTexture(nil,"ARTWORK");self.resultsBoundary:SetColorTexture(.26,.28,.32,1);self.resultsBoundary:SetHeight(1);self.resultsBoundary:Hide()
     self.rows={}
@@ -512,7 +532,7 @@ function U:Create(c)
         local b=self:Button(self.body,"",0,-(i-1)*83,c.profile.width-28,77,function()
             if c.matches then self.from:ClearFocus();self.to:ClearFocus();c:Choose(c.matches[i],c.searchOrigin)
             else c.selected=i;c:Refresh() end
-        end)
+        end,true)
         b.text:Hide();b.name=self:Text(b,"",13,10,-6,c.profile.width-50,21);b.name:SetWordWrap(true);b.name:SetNonSpaceWrap(true);b.name:SetJustifyV("TOP")
         b.detail=self:Text(b,"",11,10,-27,c.profile.width-50,41);b.detail:SetWordWrap(true);b.detail:SetNonSpaceWrap(true);b.detail:SetJustifyV("TOP")
         b.distance=self:Text(b,"",11,10,-44,c.profile.width-50,16);b.distance:SetWordWrap(true);b.distance:SetJustifyV("TOP")
@@ -523,7 +543,6 @@ function U:Create(c)
         b.go=self:Button(b,"Go",c.profile.width-80,-23,44,30,function()
             if not c.matches and c.results[i] and not c.results[i].unavailable then c.selected=i;c:Go() end
         end);b.go:Hide()
-        self:ButtonColor(b.go,{.29,.34,.21,1},{.40,.46,.28,1})
         b.locked=CreateFrame("Frame",nil,b);b.locked:SetAllPoints(b);b.locked:SetFrameLevel(b:GetFrameLevel()+4)
         local shade=b.locked:CreateTexture(nil,"BACKGROUND");shade:SetAllPoints();shade:SetColorTexture(0,0,0,.68)
         b.lockedText=self:Text(b.locked,"Undiscovered flight points",11,6,0,c.profile.width-40,22);b.lockedText:ClearAllPoints();b.lockedText:SetPoint("CENTER");b.lockedText:SetTextColor(.95,.25,.25)
@@ -538,7 +557,7 @@ function U:Create(c)
     self.body:EnableMouseWheel(true);self.body:SetScript("OnMouseWheel",scroll);self.bodyScroll:EnableMouseWheel(true);self.bodyScroll:SetScript("OnMouseWheel",scroll)
     self.note=self:Text(f,"",11,14,-200,c.profile.width-28,44);self.note:SetWordWrap(true);self.note:SetJustifyH("CENTER");self.note:SetTextColor(.68,.71,.76)
     self.go=self:Button(f,"Find routes",14,-246,c.profile.width-88,30,function() self.from:ClearFocus();self.to:ClearFocus();c:PrimaryAction() end)
-    self.stop=self:Button(f,"",c.profile.width-42,-246,28,28,function() c:Stop() end);self:Icon(self.stop,"close");self:ButtonColor(self.stop,{.52,.12,.14,1},{.70,.18,.20,1});self:Tip(self.stop,"Stop navigation")
+    self.stop=self:Button(f,"",c.profile.width-42,-246,28,28,function() c:Stop() end);self:Icon(self.stop,"close");self:Tip(self.stop,"Stop navigation")
     self.guidance=CreateFrame("Frame",nil,f);self.guidance:SetPoint("TOPLEFT",14,-48);self.guidance:SetSize(c.profile.width-28,94)
     self.arrow=self.guidance:CreateTexture(nil,"ARTWORK");self:NavigationArrow(self.arrow);self.arrow:SetPoint("TOPLEFT",0,-4);self.arrow:SetSize(32,32)
     self.next=self:Text(self.guidance,"",13,44,0,c.profile.width-72,25);self.next.atcfEmphasis=true;self.next.atcfFontScale=1.1;self:Font(self.next,13);self.next:SetTextColor(1,.82,0)
@@ -555,8 +574,8 @@ function U:Create(c)
     end)
     self:PauseIcon(c)
     self.fold=self:Button(f,"Fold",14,-125,50,30,function() c.compact=true;c:Refresh() end)
-    local handle=CreateFrame("Button",nil,UIParent);self.handle=handle;handle:Hide();handle:SetSize(24,64);handle:SetFrameStrata(c.profile.strata);handle:SetFrameLevel(100);handle:RegisterForDrag("LeftButton")
-    handle.bg=self:Rectangle(handle,{.13,.14,.17,1});handle.normalColor={.13,.14,.17,1};handle.hoverColor={.22,.24,.28,1}
+    local handle=CreateFrame("Button",nil,UIParent,"BackdropTemplate");self.handle=handle;handle:Hide();handle:SetSize(24,64);handle:SetFrameStrata(c.profile.strata);handle:SetFrameLevel(100);handle:RegisterForDrag("LeftButton")
+    self:StyleButton(handle)
     handle.text=self:Text(handle,">",16,0,0,24,64);handle.text:SetJustifyH("CENTER")
     handle:SetScript("OnMouseDown",function(_,button) if button=="LeftButton" then self.handleSuppressClick=false end end)
     handle:SetScript("OnDragStart",function()
@@ -570,14 +589,11 @@ function U:Create(c)
     local function finishHandle() self:UpdateHandleDrag(c);self:FinishHandleDrag() end
     handle:SetScript("OnDragStop",finishHandle)
     handle:SetScript("OnMouseUp",function(_,button) if button=="LeftButton" then finishHandle() end end)
-    handle:SetScript("OnHide",function() self:FinishHandleDrag() end)
+    handle:HookScript("OnHide",function() self:FinishHandleDrag() end)
     handle:SetScript("OnClick",function() if not self.handleSuppressClick then c.tucked=false;self:Layout(c) end end)
     self:Tip(handle,"Click to expand. Drag up or down to move.")
     local grip=CreateFrame("Button",nil,f);self.resizeGrip=grip;grip:SetSize(18,18);grip:SetPoint("BOTTOMRIGHT",f,"BOTTOMRIGHT",-1,1);grip:SetFrameLevel(f:GetFrameLevel()+10)
-    for _,length in ipairs({4,8,12}) do
-        local line=grip:CreateLine(nil,"ARTWORK");line:SetThickness(1.5);line:SetColorTexture(.75,.76,.8,1)
-        line:SetStartPoint("BOTTOMRIGHT",grip,-length,3);line:SetEndPoint("BOTTOMRIGHT",grip,-3,length)
-    end
+    grip.texture=grip:CreateTexture(nil,"ARTWORK");grip.texture:SetAllPoints();grip.texture:SetTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up")
     self:Tip(grip,"Drag to resize")
     grip:SetScript("OnMouseDown",function(_,button)
         if button~="LeftButton" or c.profile.locked or self.dragging or not grip:IsShown() then return end
@@ -587,7 +603,8 @@ function U:Create(c)
     end)
     grip:SetScript("OnMouseUp",function(_,button) if button=="LeftButton" and self.resizing then self:FinishResize(c);c:Refresh() end end)
     grip:SetScript("OnHide",function() self:FinishResize(c,false) end)
-    f:SetScript("OnSizeChanged",function(_,width,height)
+    -- BackdropTemplate owns border tiling when the panel's dimensions change.
+    f:HookScript("OnSizeChanged",function(_,width,height)
         if not self.resizing or self.resizeLayout then return end
         self:CancelStaleGestures(c);if not self.resizing then return end
         c.profile.width=math.max(N.Settings.minWidth,math.min(N.Settings.maxWidth,width))
@@ -599,7 +616,8 @@ function U:Create(c)
         self:FinishResize(c,false);self:FinishMove(c,false)
     end)
     self.from:SetText("Current location");self:Layout(c)
-    local menu=CreateFrame("Frame","AsTheCrowFliesMenu",f);self.menu=menu;menu:SetPoint("TOPRIGHT",f,"TOPRIGHT",-8,-40);menu:SetSize(196,172);menu:SetFrameStrata("DIALOG");menu:SetFrameLevel(f:GetFrameLevel()+20);menu:EnableMouse(true);self:Surface(menu)
+    local menu=CreateFrame("Frame","AsTheCrowFliesMenu",f,"BackdropTemplate");self.menu=menu;menu:SetPoint("TOPRIGHT",f,"TOPRIGHT",-8,-40);menu:SetSize(196,172);menu:SetFrameStrata("DIALOG");menu:SetFrameLevel(f:GetFrameLevel()+20);menu:EnableMouse(true);menu:SetClampedToScreen(true);self:Dialog(menu,true)
+    menu:SetScript("OnShow",function() self:PlaceMenu() end)
     local function action(label,y,fn)
         local b=self:Button(menu,label,8,y,180,26,function() menu:Hide();fn() end);b.text.atcfFixedFont=true;self:Font(b.text,12);return b
     end
@@ -609,6 +627,15 @@ function U:Create(c)
     self.menuTuck=action("Tuck to screen edge",-104,function() self:SetDock(c,c.profile.dock=="none" and "right" or c.profile.dock,true) end)
     self.menuClose=action("Close menu",-136,function() end);menu:Hide()
     UISpecialFrames=UISpecialFrames or {};table.insert(UISpecialFrames,"AsTheCrowFliesMenu")
+end
+function U:PlaceMenu()
+    local menu=self.menu
+    if not menu or not menu:IsShown() then return end
+    local top=self.frame:GetTop();if not top then return end
+    local scale=menu:GetEffectiveScale()/UIParent:GetEffectiveScale()
+    local height=UIParent:GetHeight()/scale
+    local menuTop=math.max(menu:GetHeight(),math.min(height,top-40))
+    menu:ClearAllPoints();menu:SetPoint("TOPRIGHT",self.frame,"TOPRIGHT",-8,menuTop-top)
 end
 function U:Layout(c)
     self:CancelStaleGestures(c)
@@ -646,6 +673,7 @@ function U:Layout(c)
         f:SetResizeBounds(N.Settings.minWidth,minimum,math.max(N.Settings.minWidth,math.min(N.Settings.maxWidth,sw-16)),math.max(minimum,results and math.min(chrome+560,sh-16) or sh-16))
     end
     self.handle:SetScale(scale);self:UpdateHandleDrag(c);self:PlaceHandle(c)
+    self:PlaceMenu()
     self:Icon(self.handle,p.dock=="right" and "left" or "right");self.handle:SetShown(not c.hidden and c.tucked==true);f:SetShown(not c.hidden and not c.tucked)
 end
 function U:LayoutGuidance(c)
@@ -698,7 +726,7 @@ function U:Refresh(c)
             end
             self.sortLabel:ClearAllPoints();self.sortLabel:SetPoint("TOPLEFT",0,-y)
             self.routeOrder:ClearAllPoints();self.routeOrder:SetPoint("TOPLEFT",38,-y);self.routeOrder:SetWidth(c.profile.width-66)
-            if self.routeOrder.Text then self.routeOrder.Text:SetWidth(c.profile.width-102) end
+            if self.routeOrder.Text then self.routeOrder.Text:SetWidth(self.routeOrder:GetWidth()-31) end
             self.routeOrder.value=c.profile.routeOrder;self.routeOrder:SetDefaultText(c.profile.routeOrder=="time" and "Estimated time" or "Distance");self:SyncMenus()
             heading:SetHeight(y+30);bodyTop=bodyTop+y+30
         end
@@ -737,7 +765,7 @@ function U:Refresh(c)
                 local rowHeight=y+4
                 b:SetHeight(rowHeight);b:ClearAllPoints();b:SetPoint("TOPLEFT",0,-bodyHeight);b.bodyOffset=bodyHeight
                 b.go:ClearAllPoints();b.go:SetPoint("TOPRIGHT",b,"TOPRIGHT",-8,-6);bodyHeight=bodyHeight+rowHeight+5
-                b.normalColor=(c.matches and i==c.highlight or not c.matches and i==c.selected) and {.22,.27,.18,1} or {.10,.11,.14,1};b.bg:SetVertexColor(unpack(b.normalColor))
+                b.atcfSelected=c.matches and i==c.highlight or not c.matches and i==c.selected;self:RefreshButton(b)
             end
         end
         bodyHeight=math.max(0,bodyHeight-5)
