@@ -11,6 +11,8 @@ A compact navigation island that helps you find NPCs and saved places, compare w
 
 For World of Warcraft: Forever. Travel times are estimates; ground directions are compass bearings. Movement and flight selection stay manual.
 
+<img width="600" alt="atcf-new" src="https://github.com/user-attachments/assets/a60f82a6-b24d-41b3-8ea6-37a4a3deea7d" />
+
 ## Installation
 
 Copy the `AsTheCrowFlies` folder into your Forever client's `Interface/AddOns` directory, then restart WoW. The folder should contain `AsTheCrowFlies.toc` directly. NPC search requires Forever QuestieDB (contract 3).
