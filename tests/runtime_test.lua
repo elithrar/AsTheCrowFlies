@@ -1899,6 +1899,54 @@ local function flushLifecycle()
     end
     error('lifecycle callbacks did not settle')
 end
+local function indexingComparison(hasMatch)
+    local fresh=boot(nil,nil,nil,true);local c=fresh.Core
+    local goal=fresh.Model.Copy(fresh.Adapter.Position());goal.x=goal.x+100
+    goal.id='indexed-auctioneer';goal.name='Indexed auctioneer';goal.category='auction'
+    c.provider.ids={1};c.provider.cursor=1
+    fresh.Providers.Step=function(provider)
+        provider.items=hasMatch and {goal} or {};provider.cursor=2;return true
+    end
+    c.filter.categories.auction=true;c:Plan()
+    assert(c.status=='Indexing NPC destinations...' and #c.results==0)
+    return fresh,goal
+end
+test('provider completion finishes waiting comparisons with routes or final empty status',function()
+    for _,hasMatch in ipairs({true,false}) do
+        local fresh,goal=indexingComparison(hasMatch);local c=fresh.Core
+        flushLifecycle()
+        assert(c.providerStatus==nil and c.providerPlanGeneration==nil)
+        if hasMatch then assert(#c.results==1 and c.results[1].destination==goal and not c.status)
+        else assert(#c.results==0 and c.status=='No matching destinations.') end
+        assert(c.hidden and not fresh.UI.frame:IsShown(),'completion respects panel visibility')
+    end
+end)
+test('provider completion does not resurrect superseded comparisons',function()
+    for _,action in ipairs({'edit','back','stop','choose','search'}) do
+        local fresh,goal=indexingComparison(true);local c=fresh.Core
+        if action=='edit' then c:Edit(true)
+        elseif action=='back' then c:Back()
+        elseif action=='stop' then c:Stop()
+        elseif action=='choose' then c:Choose(goal,false)
+        else c:Search('Indexed',false) end
+        local generation=c.searchGeneration
+        flushLifecycle()
+        assert(#c.results==0 and c.providerPlanGeneration==nil,'abandoned comparison must not return: '..action)
+        assert(c.searchGeneration==generation,'completion must not start another plan: '..action)
+        if action=='choose' then assert(c.destination==goal)
+        elseif action=='search' then assert(#c.matches==1 and c.matches[1]==goal) end
+    end
+end)
+test('waiting comparison completion preserves active navigation',function()
+    local fresh,goal=indexingComparison(true);local c=fresh.Core
+    local p=fresh.Adapter.Position();local active=fresh.Model.Copy(p);active.x=p.x+300;active.id='active';active.name='Active destination'
+    c:Choose(active);c:Plan();c:Go();local route=c.nav.route
+    assert(route and route.destination==active)
+    c.destination=nil;c:Plan();assert(c.status=='Indexing NPC destinations...')
+    flushLifecycle()
+    assert(#c.results==1 and c.results[1].destination==goal)
+    assert(c.nav.route==route and c.character.intent=='active' and c.nav.state=='walking')
+end)
 local function hiddenLifecycle(fresh)
     local c,u=fresh.Core,fresh.UI
     local function check() assert(c.hidden and not u.frame:IsShown() and not u.handle:IsShown(),'hidden panel or tab reopened') end

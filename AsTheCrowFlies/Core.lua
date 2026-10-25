@@ -143,7 +143,7 @@ function C:PrimaryAction()
 end
 function C:Plan(useCurrent)
     self.arrivalUntil=nil
-    self.searchGeneration=self.searchGeneration+1;self.matches=nil;self.searching=nil;self.planned=true;self.status=nil
+    self.searchGeneration=self.searchGeneration+1;self.matches=nil;self.searching=nil;self.planned=true;self.status=nil;self.providerPlanGeneration=nil
     local origin=not useCurrent and self.origin or A.Position()
     if useCurrent then self.origin=nil end
     local candidates,ranks
@@ -159,7 +159,9 @@ function C:Plan(useCurrent)
     if #candidates==0 then
         local categories=self.filter.categories or {};local npc=not M.HasFilter(self.filter)
         for key in pairs(categories) do if key~="place" and key~="flight" then npc=true end end
-        self.results={};self.status=npc and not self.provider and "NPC search requires Forever QuestieDB." or npc and type(self.provider.ids)=="table" and self.provider.cursor<=#self.provider.ids and "Indexing NPC destinations..." or "No matching destinations."
+        local indexing=npc and self.provider and type(self.provider.ids)=="table" and self.provider.cursor<=#self.provider.ids
+        if indexing then self.providerPlanGeneration=self.searchGeneration end
+        self.results={};self.status=npc and not self.provider and "NPC search requires Forever QuestieDB." or indexing and "Indexing NPC destinations..." or "No matching destinations."
         self:Refresh();return
     end
     local capped;candidates,capped=R.Candidates(origin,candidates,self.data,self:Context(),12)
@@ -304,7 +306,13 @@ function C:Initialize()
             local done=N.Providers.Step(provider,40)
             if done then
                 self:Reindex();self.providerStatus=nil
-                if self.matches~=nil then self:Search(self.searchOrigin and self.originQuery or self.query or "",self.searchOrigin) else self:Refresh() end
+                -- Only resume the comparison that actually waited for this data.
+                -- Editing, choosing, Back and Stop advance the same generation.
+                local resumePlan=self.providerPlanGeneration==self.searchGeneration
+                self.providerPlanGeneration=nil
+                if resumePlan then self:Plan()
+                elseif self.matches~=nil then self:Search(self.searchOrigin and self.originQuery or self.query or "",self.searchOrigin)
+                else self:Refresh() end
             else C_Timer.After(.01,step) end
         end
         C_Timer.After(.1,step)
