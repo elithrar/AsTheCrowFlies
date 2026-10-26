@@ -20,10 +20,10 @@ VERSION = re.search(r'^## Version: (.+)$',
                     (ROOT / 'AsTheCrowFlies/AsTheCrowFlies.toc').read_text(encoding='utf-8'),
                     re.M).group(1)
 TAXI_SHA256 = 'e74250e6ed1ea8cf69e3869e161135bb1bbba195ba794f5e0ccd78fc30320db7'
-TOC_FILES = ['Model.lua', 'Settings.lua', 'Data/Registry.lua', 'Data/Taxi.lua',
+TOC_FILES = ['Libs/SomethingNeedDoing/' + name for name in ['Core.lua', 'Diagnostics.lua', 'Scope.lua', 'State.lua', 'Settings.lua', 'UI.lua', 'Options.lua']] + ['Model.lua', 'Settings.lua', 'Data/Registry.lua', 'Data/Taxi.lua',
              'Routes.lua', 'Navigation.lua', 'Adapter.lua', 'Providers.lua',
              'UI.lua', 'Overlay.lua', 'Options.lua', 'Core.lua']
-RUNTIME_FILES = {'AsTheCrowFlies.toc', 'Bindings.xml', *TOC_FILES,
+RUNTIME_FILES = {'Libs/SomethingNeedDoing/LICENSE', 'Libs/SomethingNeedDoing/UPSTREAM.json', 'AsTheCrowFlies.toc', 'Bindings.xml', *TOC_FILES,
                  'Media/eagle.tga', 'Media/arrow.tga', 'Media/surface.tga', 'Media/cog.tga'}
 
 
@@ -65,7 +65,7 @@ class Packages(unittest.TestCase):
         self.assertEqual(report['bytes'], path.stat().st_size)
         with zipfile.ZipFile(path) as archive:
             names = archive.namelist()
-            runtime = {name for name in names if not name.endswith(('.md', '.json'))}
+            runtime = {name for name in names if not name.endswith(('.md', '.json')) or name.endswith('/Libs/SomethingNeedDoing/UPSTREAM.json')}
             self.assertEqual(runtime, {'AsTheCrowFlies/' + name for name in RUNTIME_FILES})
             self.assertEqual(len(names), len(set(names)))
             self.assertEqual(names, sorted(names))

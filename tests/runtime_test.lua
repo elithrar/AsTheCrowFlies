@@ -1,3 +1,13 @@
+-- CallbackHandler accepts method names and multiple owners for each event.
+local function registerMedia(callbacks, owner, event, callback)
+    local previous = callbacks[event]
+    callbacks[event] = function(...)
+        if previous then previous(...) end
+        if type(callback)=="string" then owner[callback](owner, ...) else callback(...) end
+    end
+end
+local callbackErrors={}
+function geterrorhandler() return function(message) callbackErrors[#callbackErrors+1]=message end end
 local frames,timers,hooks={},{},{};local now=0;local cursorX,cursorY=400,500
 local methods={}
 function methods:SetPoint(...) local args={...};self.point=args;if #args==5 then assert(type(args[4])=='number' and type(args[5])=='number','SetPoint requires numeric offsets') end end
@@ -16,6 +26,8 @@ function methods:SetScript(event,fn) self.scripts[event]=fn end
 function methods:GetScript(event) return self.scripts[event] end
 function methods:HookScript(event,fn) local previous=self.scripts[event];self.scripts[event]=function(...) if previous then previous(...) end;fn(...) end end
 function methods:RegisterEvent(event) self.events[event]=true end
+function methods:UnregisterEvent(event) self.events[event]=nil end
+function methods:UnregisterAllEvents() self.events={} end
 function methods:Show() self.showCount=(self.showCount or 0)+1;local changed=self.shown==false;self.shown=true;if changed and self.scripts.OnShow then self.scripts.OnShow(self) end end
 function methods:Hide() local changed=self.shown~=false;self.shown=false;if changed and self.scripts.OnHide then self.scripts.OnHide(self) end end
 function methods:SetShown(v) if v then self:Show() else self:Hide() end end
@@ -181,7 +193,18 @@ C_TaxiMap={GetTaxiNodesForMap=function() return {{nodeID=1,faction=2,isUndiscove
 function TakeTaxiNode(slot) end
 function hooksecurefunc(target,name,fn)
     if type(target)=='string' then hooks[target]=name;return end
-    local original=target[name];target[name]=function(self,...) local result=original(self,...);fn(self,...);return result end
+    if target==_G then hooks[name]=fn end
+    local original=target[name];target[name]=function(...) local result=original(...);fn(...);return result end
+end
+local function registered(name)
+    for _,frame in ipairs(frames) do if frame.events[name] then return true end end
+    return false
+end
+local function dispatchEvent(name,...)
+    for _,frame in ipairs(frames) do
+        if frame.events[name] and frame.scripts.OnEvent then frame.scripts.OnEvent(frame,name,...) end
+    end
+    assert(#callbackErrors==0,callbackErrors[1])
 end
 local N={};local files={}
 for line in io.lines(ROOT..'/AsTheCrowFlies/AsTheCrowFlies.toc') do if line:match('%.lua$') then files[#files+1]=line end end
@@ -190,8 +213,8 @@ local A,C,U=N.Adapter,N.Core,N.UI;local count=0
 local function test(name,fn) local ok,err=pcall(fn);assert(ok,name..': '..tostring(err));count=count+1 end
 test('TOC load and ADDON_LOADED restoration lifecycle',function()
     assert(not C.ready);AsTheCrowFliesDB={version=1,font='Arial',scale=.9};AsTheCrowFliesCharacter={version=1,build='old'}
-    C.events.scripts.OnEvent(nil,'ADDON_LOADED','AnotherAddon');assert(not C.ready)
-    C.events.scripts.OnEvent(nil,'ADDON_LOADED','AsTheCrowFlies');assert(C.ready and C.profile.font=='Arial' and C.profile.scale==.9)
+    dispatchEvent('ADDON_LOADED','AnotherAddon');assert(not C.ready)
+    dispatchEvent('ADDON_LOADED','AsTheCrowFlies');assert(C.ready and C.profile.font=='Arial' and C.profile.scale==.9)
     assert(AsTheCrowFliesDB==C.profile and AsTheCrowFliesCharacter==C.character)
 end)
 test('native map transform and projection round trip',function()
@@ -287,7 +310,7 @@ test('open taxi before Go reconciles whole itinerary with unknown fly-through',f
     C:Choose(C.data.nodes[3]);C:Plan();local flightIndex
     for i,r in ipairs(C.results) do if r.flight>0 and not r.conditional then flightIndex=i end end
     assert(flightIndex);C.selected=flightIndex;C:Go();assert(C.nav.state=='awaiting_flight' and C.nav.route.legs[C.nav.leg].to==3)
-    C.events.scripts.OnEvent(nil,'TAXIMAP_CLOSED');assert(C.results[flightIndex].conditional and C.nav.route.conditional)
+    dispatchEvent('TAXIMAP_CLOSED');assert(C.results[flightIndex].conditional and C.nav.route.conditional)
     C:TaxiOpened()
     assert(N.Navigation.Target(C.nav).id==1);hooks.TakeTaxiNode(3);onTaxi=true;now=1;C:Tick();assert(C.nav.state=='flying')
     playerY=playerY+.1;onTaxi=false;now=21;C:Tick();assert(C.character.timings['101,102'][1]==20)
@@ -365,7 +388,7 @@ test('header controls open useful menu and back preserves navigation',function()
 end)
 
 test('commands open options idempotently and explicit show hide retain route state',function()
-    local commands=SlashCmdList.ASTHECROWFLIES;N.Options.frame:Hide();commands('');assert(N.Options.frame:IsShown())
+    local commands=SlashCmdList.ASTHECROWFLIES_SND_ATCF;N.Options.frame:Hide();commands('');assert(N.Options.frame:IsShown())
     commands('opts');commands('options');assert(N.Options.frame:IsShown())
     local state=C.nav;commands('hide');C:Tick();assert(not U.frame:IsShown() and not U.handle:IsShown() and C.nav==state)
     commands('show');assert(U.frame:IsShown() and not C.hidden);commands(' OPTIONS ');assert(N.Options.frame:IsShown())
@@ -373,7 +396,7 @@ test('commands open options idempotently and explicit show hide retain route sta
 end)
 
 test('fonts reach dropdown rows and late SharedMedia registration',function()
-    local available=false;local callbacks={};local lib={IsValid=function() return available end,Fetch=function() return 'expressway.ttf' end,List=function() return {'Expressway'} end,RegisterCallback=function(owner,event,fn) callbacks[event]=fn end}
+    local available=false;local callbacks={};local lib={IsValid=function() return available end,Fetch=function() return 'expressway.ttf' end,List=function() return {'Expressway'} end,RegisterCallback=function(owner,event,fn) registerMedia(callbacks,owner,event,fn) end}
     LibStub=function() return lib end;C.profile.font='Expressway';U:WatchFonts();available=true;callbacks.LibSharedMedia_Registered(nil,'font')
     assert(U.title.font=='expressway.ttf' and N.Options.order.Text.font=='expressway.ttf' and U.menuFont.font=='expressway.ttf')
     local initializers={};local root={SetScrollMode=function() end,CreateRadio=function() return {AddInitializer=function(_,fn) initializers[#initializers+1]=fn end} end}
@@ -429,14 +452,14 @@ test('taxi observation unlocks an already displayed undiscovered route',function
     local _,cleanup=discoveryFixture()
     C_TaxiMap.GetTaxiNodesForMap=function() return {{nodeID=201,faction=2,isUndiscovered=false},{nodeID=203,faction=2,isUndiscovered=false}} end
     C_TaxiMap.GetAllTaxiNodes=function() return nil end
-    C.events.scripts.OnEvent(nil,'TAXIMAP_OPENED')
+    dispatchEvent('TAXIMAP_OPENED')
     local conditional;for _,r in ipairs(C.results) do if r.flight>0 then conditional=r;assert(not r.unavailable and r.conditional) end end;assert(conditional)
     C_TaxiMap.GetAllTaxiNodes=function() return {{nodeID=203,state=0,slotIndex=3}} end
-    C.events.scripts.OnEvent(nil,'TAXIMAP_OPENED');assert(not C.taxi and U.note:GetText():find('could not be reconciled'))
+    dispatchEvent('TAXIMAP_OPENED');assert(not C.taxi and U.note:GetText():find('could not be reconciled'))
     for _,r in ipairs(C.results) do assert(not r.unavailable) end
     C_TaxiMap.GetAllTaxiNodes=function() return {{nodeID=201,state=0,slotIndex=1},{nodeID=203,state=1,slotIndex=3}} end
     GetNumRoutes=function() return 1 end;TaxiGetNodeSlot=function(_,_,source) return source and 1 or 3 end
-    C.events.scripts.OnEvent(nil,'TAXIMAP_OPENED');assert(C.character.known[203].state=='known')
+    dispatchEvent('TAXIMAP_OPENED');assert(C.character.known[203].state=='known')
     local index;for i,r in ipairs(C.results) do if r.flight>0 then index=i;assert(not r.unavailable and not r.conditional) end end;assert(index)
     assert(not U.rows[index].locked:IsShown() and U.rows[index].go.enabled)
     U.rows[index].go.scripts.OnClick();assert(C.nav.route and C.nav.state=='awaiting_flight' and not C.nav.route.unavailable)
@@ -449,7 +472,7 @@ test('offered whole flight remains usable through explicitly undiscovered interm
     C_TaxiMap.GetTaxiNodesForMap=function() return {{nodeID=201,faction=2,isUndiscovered=false},{nodeID=202,faction=2,isUndiscovered=true},{nodeID=203,faction=2,isUndiscovered=false}} end
     C_TaxiMap.GetAllTaxiNodes=function() return {{nodeID=201,state=0,slotIndex=1},{nodeID=202,state=2,slotIndex=2},{nodeID=203,state=1,slotIndex=3}} end
     GetNumRoutes=function() return 2 end;TaxiGetNodeSlot=function(_,i,source) return source and i or i+1 end
-    C.events.scripts.OnEvent(nil,'TAXIMAP_OPENED');assert(C.character.known[202].state=='undiscovered')
+    dispatchEvent('TAXIMAP_OPENED');assert(C.character.known[202].state=='undiscovered')
     C:Choose(goal);C:Plan();local index
     for i,r in ipairs(C.results) do if r.flight>0 and not r.conditional then index=i;assert(not r.unavailable and r.signature=='discovery-goal/711/712') end end;assert(index)
     assert(U.rows[index].go.enabled and not U.rows[index].locked:IsShown())
@@ -722,7 +745,7 @@ test('long names and flight descriptions grow and scroll without shrinking the i
     assert(U.frame:GetWidth()*U.frame:GetScale()==physical and U.next:GetText()==goal.name and U.next:GetHeight()>40)
     assert(not U.scrollRail:IsShown() and not U.scrollThumb:IsShown(),'overflow cue hides with result viewport')
     C.compact=false;C:Refresh();assert(U.frame:GetWidth()*U.frame:GetScale()==physical)
-    UIParent:SetSize(1280,540);C.events.scripts.OnEvent(nil,'DISPLAY_SIZE_CHANGED')
+    UIParent:SetSize(1280,540);dispatchEvent('DISPLAY_SIZE_CHANGED')
     assert(U.frame:GetHeight()*U.frame:GetScale()<=540 and U.scrollRail:IsShown())
     C.nav.route=nil;goal.category='place';C.matches={goal,goal,goal};C.highlight=1;C:Refresh();C.highlight=3;C:Refresh()
     assert(U.bodyScroll:GetVerticalScroll()>0 and U.bodyScroll:GetVerticalScroll()<=U.rows[3].bodyOffset)
@@ -751,7 +774,7 @@ end)
 test('late media registration refits options and custom text color leaves native menus legible',function()
     local O=N.Options;local original=LibStub;local callbacks={};local available=false
     local lib={IsValid=function() return available end,Fetch=function() return 'late-wide.ttf' end,List=function() return {'Expressway'} end,
-        RegisterCallback=function(_,event,fn) callbacks[event]=fn end}
+        RegisterCallback=function(owner,event,fn) registerMedia(callbacks,owner,event,fn) end}
     local width=O.font.Text.GetUnboundedStringWidth;O.font.Text.GetUnboundedStringWidth=function(self) return #(self:GetText())*(available and 40 or 6) end
     local color=N.Model.Copy(C.profile.colors.text);C.profile.colors.text={.2,.3,.4};C:ApplyProfile()
     assert(U.menuFont.textColor[1]==.93 and O.font.Text.textColor[1]~=.2)
@@ -772,7 +795,7 @@ local function withFontLibrary(run)
     local previous,preference,watched=LibStub,C.profile.font,U.fontLibrary
     local callbacks={};local lib={IsValid=function(_,kind,name) return kind=='font' and name=='Expressway' end,
         Fetch=function() return 'review-expressway.ttf' end,List=function() return {'Expressway'} end,
-        RegisterCallback=function(_,event,fn) callbacks[event]=fn end}
+        RegisterCallback=function(owner,event,fn) registerMedia(callbacks,owner,event,fn) end}
     LibStub=function() return lib end;C.profile.font='Expressway';C:ApplyProfile()
     run(lib,callbacks)
     LibStub=previous;C.profile.font=preference;U.fontLibrary=watched;C:ApplyProfile()
@@ -851,10 +874,10 @@ test('first late SharedMedia library attachment refreshes and refits the complet
     LibStub=nil;U.fontLibrary=nil;C.profile.font='Expressway';C:ApplyProfile()
     assertOwnedFamily(STANDARD_TEXT_FONT);assert(O.font.Text:GetScale()==1)
     local lib={IsValid=function() return true end,Fetch=function() return 'late-first.ttf' end,List=function() return {'Expressway'} end,
-        RegisterCallback=function(_,event,fn) callbacks[event]=fn end}
+        RegisterCallback=function(owner,event,fn) registerMedia(callbacks,owner,event,fn) end}
     -- All registrations happened before this addon's ADDON_LOADED event; no
     -- registration callback will rescue a font-only attachment refresh.
-    LibStub=function() return lib end;C.events.scripts.OnEvent(nil,'ADDON_LOADED','LateMediaProvider')
+    LibStub=function() return lib end;dispatchEvent('ADDON_LOADED','LateMediaProvider')
     assert(callbacks.LibSharedMedia_Registered and callbacks.LibSharedMedia_SetGlobal)
     assertOwnedFamily('late-first.ttf');assert(O.font.Text:GetScale()==1 and O.font.Text:GetText()=='Ex...')
     assert(O.font.value=='Expressway' and O.font.fullCaption=='Expressway')
@@ -1006,7 +1029,7 @@ test('edge drag handles unavailable cursor locking hiding side changes and profi
     local locked=C.profile.dockPosition;handle.scripts.OnMouseDown(handle,'LeftButton');handle.scripts.OnDragStart(handle,'LeftButton');assert(not U.handleDrag and C.profile.dockPosition==locked)
     C.profile.locked=false;C:Refresh();begin();C:ShowPanel(false);assert(not U.handleDrag)
     C:ShowPanel(true);U:SetDock(C,'right',true);begin();U:SetDock(C,'left',true);assert(not U.handleDrag and C.profile.dock=='left')
-    begin();local position=C.profile.dockPosition;UIParent:SetScale(.8);C.events.scripts.OnEvent(nil,'UI_SCALE_CHANGED')
+    begin();local position=C.profile.dockPosition;UIParent:SetScale(.8);dispatchEvent('UI_SCALE_CHANGED')
     assert(not U.handleDrag and C.profile.dockPosition==position,'a screen scale change cancels the old physical-pixel gesture')
     UIParent:SetScale(parentScale);C:ApplyProfile()
     begin();local prior=C.profile;local replacement=N.Model.Copy(prior);replacement.dockPosition=.8;C.profile=replacement;C:ApplyProfile()
@@ -1130,11 +1153,11 @@ test('geometry gestures cancel on display changes while routine font refresh kee
     C.destination=nil;C.matches=nil;C.query='';C.status=nil;C.profile.locked=false;C.profile.scale=1.6;C.profile.width=240;U:SetDock(C,'none',false);C:ApplyProfile()
     U.resizeGrip.scripts.OnMouseDown(U.resizeGrip,'LeftButton');assert(U.resizing and U.frame.sizing=='RIGHT')
     C:RefreshAppearance(false);assert(U.resizing and U.frame.sizing=='RIGHT','ordinary font refresh must not end a resize')
-    UIParent:SetSize(900,320);C.events.scripts.OnEvent(nil,'DISPLAY_SIZE_CHANGED')
+    UIParent:SetSize(900,320);dispatchEvent('DISPLAY_SIZE_CHANGED')
     assert(not U.resizing and not U.frame.sizing and math.abs(U.frame:GetScale()-320/660)<.0001,'display shrink cancels native sizing and refits immediately')
     local width=C.profile.width;U.resizeGrip.scripts.OnMouseUp(U.resizeGrip,'LeftButton');assert(C.profile.width==width)
     UIParent:SetSize(screenWidth,screenHeight);C:ApplyProfile();U.header.scripts.OnDragStart();assert(U.dragging and U.frame.moving)
-    UIParent:SetScale(.8);C.events.scripts.OnEvent(nil,'UI_SCALE_CHANGED');assert(not U.dragging and not U.frame.moving)
+    UIParent:SetScale(.8);dispatchEvent('UI_SCALE_CHANGED');assert(not U.dragging and not U.frame.moving)
     UIParent:SetScale(parentScale);C:ApplyProfile();U.resizeGrip.scripts.OnMouseDown(U.resizeGrip,'LeftButton');assert(U.resizing)
     C.profile=N.Model.Copy(C.profile);C.profile.width=220;C.profile.x=91;C.profile.y=-77;C:ApplyProfile()
     assert(not U.resizing and not U.frame.sizing and C.profile.width==220 and C.profile.x==91 and C.profile.y==-77)
@@ -1316,7 +1339,7 @@ test('wrapped row measurement settles fractional scale before measuring and keep
     C:ApplyProfile();local row=U.rows[1];local scale=row.name:GetEffectiveScale()
     assert(scale==1.25 and row.name:GetHeight()==(math.ceil(13*scale)+2)/scale)
     assert(U.resultsBoundary:IsShown() and -U.go.point[3]>U.bodyTop+U.bodyScroll:GetHeight())
-    UIParent:SetSize(1280,540);C.events.scripts.OnEvent(nil,'DISPLAY_SIZE_CHANGED');scale=row.name:GetEffectiveScale()
+    UIParent:SetSize(1280,540);dispatchEvent('DISPLAY_SIZE_CHANGED');scale=row.name:GetEffectiveScale()
     assert(scale==U.frame:GetEffectiveScale() and row.name:GetHeight()==(math.ceil(13*scale)+2)/scale)
     assert(U.frame:GetHeight()*scale<=540)
     C.highlight=40;C.profile.width=640;C:Refresh();C.profile.width=280;C.profile.fontSize=18;C:ApplyProfile()
@@ -1501,24 +1524,24 @@ test('only genuine NPC show events complete the active destination rather than a
     local goal,start,cleanup=arrivalFixture();local route=start()
     local preview=N.Model.Copy(goal);preview.id='preview-npc';preview.npcID=999;C:Choose(preview)
     UnitGUID=function(unit) return unit=='npc' and 'Creature-0-1234-0-0-999-000000ABCD' or nil end
-    C.events.scripts.OnEvent(nil,'GOSSIP_SHOW');assert(C.nav.route==route and not C.arrivalUntil,'preview identity cannot complete the active route')
+    dispatchEvent('GOSSIP_SHOW');assert(C.nav.route==route and not C.arrivalUntil,'preview identity cannot complete the active route')
     UnitGUID=function(unit) return unit=='target' and 'Creature-0-1234-0-0-1498-000000ABCD' or nil end
-    C.events.scripts.OnEvent(nil,'GOSSIP_SHOW');assert(C.nav.route==route,'targeting the destination is not an interaction')
+    dispatchEvent('GOSSIP_SHOW');assert(C.nav.route==route,'targeting the destination is not an interaction')
     UnitGUID=function() return 'Creature-0-1234-0-0-1498-000000ABCD' end
-    C.events.scripts.OnEvent(nil,'PLAYER_TARGET_CHANGED');assert(C.nav.route==route and not C.events.events.PLAYER_TARGET_CHANGED)
+    dispatchEvent('PLAYER_TARGET_CHANGED');assert(C.nav.route==route and not registered('PLAYER_TARGET_CHANGED'))
     local kinds=Enum.PlayerInteractionType
-    C.events.scripts.OnEvent(nil,'PLAYER_INTERACTION_MANAGER_FRAME_SHOW',kinds.Item);assert(C.nav.route==route)
-    C.events.scripts.OnEvent(nil,'PLAYER_INTERACTION_MANAGER_FRAME_SHOW',kinds.TradePartner);assert(C.nav.route==route)
-    C.events.scripts.OnEvent(nil,'PLAYER_INTERACTION_MANAGER_FRAME_SHOW',kinds.WorldMap);assert(C.nav.route==route)
+    dispatchEvent('PLAYER_INTERACTION_MANAGER_FRAME_SHOW',kinds.Item);assert(C.nav.route==route)
+    dispatchEvent('PLAYER_INTERACTION_MANAGER_FRAME_SHOW',kinds.TradePartner);assert(C.nav.route==route)
+    dispatchEvent('PLAYER_INTERACTION_MANAGER_FRAME_SHOW',kinds.WorldMap);assert(C.nav.route==route)
     local secret=setmetatable({},{__eq=function() error('secret interaction type compared') end})
     issecretvalue=function(value) return rawequal(value,secret) end
-    C.events.scripts.OnEvent(nil,'PLAYER_INTERACTION_MANAGER_FRAME_SHOW',secret);assert(C.nav.route==route);issecretvalue=nil
+    dispatchEvent('PLAYER_INTERACTION_MANAGER_FRAME_SHOW',secret);assert(C.nav.route==route);issecretvalue=nil
     for _,event in ipairs({'GOSSIP_SHOW','QUEST_GREETING','QUEST_DETAIL','QUEST_PROGRESS','QUEST_COMPLETE','TRAINER_SHOW','MERCHANT_SHOW','BANKFRAME_OPENED','AUCTION_HOUSE_SHOW'}) do
-        start();assert(C.events.events[event],'missing supported interaction registration: '..event)
-        C.events.scripts.OnEvent(nil,event);assert(not C.nav.route and C.arrivalUntil,'matching interaction did not complete: '..event)
+        start();assert(registered(event),'missing supported interaction registration: '..event)
+        dispatchEvent(event);assert(not C.nav.route and C.arrivalUntil,'matching interaction did not complete: '..event)
     end
     for _,kind in ipairs({kinds.Gossip,kinds.QuestGiver,kinds.Merchant,kinds.Trainer,kinds.Banker,kinds.Auctioneer,kinds.StableMaster}) do
-        start();C.events.scripts.OnEvent(nil,'PLAYER_INTERACTION_MANAGER_FRAME_SHOW',kind);assert(not C.nav.route and C.arrivalUntil)
+        start();dispatchEvent('PLAYER_INTERACTION_MANAGER_FRAME_SHOW',kind);assert(not C.nav.route and C.arrivalUntil)
     end
     cleanup()
 end)
@@ -1526,16 +1549,16 @@ end)
 test('NPC interaction ignores unavailable identity death and taxi but accepts a paused mobile destination without coordinates',function()
     local goal,start,cleanup=arrivalFixture();local route=start();local valid='Creature-0-1234-0-0-1498-000000ABCD'
     for _,read in ipairs({function() return nil end,function() return 'Player-0-1234-0-0-1498-000000ABCD' end,function() error('restricted unit') end}) do
-        UnitGUID=read;C.events.scripts.OnEvent(nil,'QUEST_DETAIL');assert(C.nav.route==route and not C.arrivalUntil)
+        UnitGUID=read;dispatchEvent('QUEST_DETAIL');assert(C.nav.route==route and not C.arrivalUntil)
     end
     local secret={};issecretvalue=function(value) return rawequal(value,secret) end;UnitGUID=function() return secret end
-    C.events.scripts.OnEvent(nil,'GOSSIP_SHOW');assert(C.nav.route==route);issecretvalue=nil
+    dispatchEvent('GOSSIP_SHOW');assert(C.nav.route==route);issecretvalue=nil
     UnitGUID=function() return valid end;C_CreatureInfo={GetCreatureID=function() error('restricted getter') end}
-    C.events.scripts.OnEvent(nil,'GOSSIP_SHOW');assert(C.nav.route==route);C_CreatureInfo=nil
-    dead=true;C.events.scripts.OnEvent(nil,'TRAINER_SHOW');assert(C.nav.route==route);dead=false
-    onTaxi=true;C.events.scripts.OnEvent(nil,'TRAINER_SHOW');assert(C.nav.route==route);onTaxi=false
+    dispatchEvent('GOSSIP_SHOW');assert(C.nav.route==route);C_CreatureInfo=nil
+    dead=true;dispatchEvent('TRAINER_SHOW');assert(C.nav.route==route);dead=false
+    onTaxi=true;dispatchEvent('TRAINER_SHOW');assert(C.nav.route==route);onTaxi=false
     C.manualPause=true;C.nav.state='paused';C.nav.suspendedState='walking';A.Position=function() return nil end
-    C.events.scripts.OnEvent(nil,'TRAINER_SHOW');assert(not C.nav.route and C.arrivalUntil and not C.manualPause,'actual matching service interaction supersedes missing position and a user pause')
+    dispatchEvent('TRAINER_SHOW');assert(not C.nav.route and C.arrivalUntil and not C.manualPause,'actual matching service interaction supersedes missing position and a user pause')
     cleanup()
 end)
 
@@ -1545,7 +1568,7 @@ test('arrival resets transient navigation and queued search while preserving pro
     C:Search('queued origin',true);local generation=C.searchGeneration
     C.origin=goal;C.destination=goal;C.matches={goal};C.planned=true;C.lastSelection='origin';C.status='stale';C.chosenFlight={from=1,to=2};C.expected={from=1,to=2}
     C.hidden=true;C.tucked=true;U.from:SetFocus();U.to:SetFocus();local at=now
-    C.events.scripts.OnEvent(nil,'TRAINER_SHOW')
+    dispatchEvent('TRAINER_SHOW')
     assert(not C.nav.route and C.nav.state=='editing' and not C.character.intent and not C.chosenFlight and not C.expected)
     assert(not C.origin and not C.destination and not C.matches and not C.searching and not C.planned and not C.searchOrigin and not C.lastSelection and #C.results==0)
     assert((C.query or '')=='' and (C.originQuery or '')=='' and not C.compact and not U.from:HasFocus() and not U.to:HasFocus())
@@ -1554,7 +1577,7 @@ test('arrival resets transient navigation and queued search while preserving pro
     assert(profile.dock==dock and profile.dockPosition==position and profile.strata==strata and profile.width==width and profile.scale==scale)
     local queued=timers;timers={};for _,fn in ipairs(queued) do fn() end
     assert(not C.matches and not C.searching and not C.origin and not C.destination,'the canceled search cannot revive editor selections')
-    now=at+1;C.events.scripts.OnEvent(nil,'GOSSIP_SHOW');assert(C.arrivalUntil==at+3,'duplicate interaction events cannot extend arrival')
+    now=at+1;dispatchEvent('GOSSIP_SHOW');assert(C.arrivalUntil==at+3,'duplicate interaction events cannot extend arrival')
     C:ShowPanel(true);now=at+2.9;C:Tick();assert(C.arrivalUntil and U.note:GetText()=='Arrived!')
     now=at+3.1;C:Tick();assert(not C.arrivalUntil and not U.note:IsShown() and not C.nav.route)
     cleanup()
@@ -1578,12 +1601,12 @@ test('flight destination arrival requires the fresh reconciled final taxi node a
     C_TaxiMap.GetTaxiNodesForMap=function() return {} end;GetNumRoutes=function() return 0 end
     C_TaxiMap.GetAllTaxiNodes=function() return {{nodeID=301,state=0,slotIndex=1}} end
     local route=start(goal);UnitGUID=function() return nil end
-    C.events.scripts.OnEvent(nil,'TAXIMAP_OPENED');assert(C.nav.route==route and C.taxi.from==301,'opening an earlier master cannot complete the final destination')
+    dispatchEvent('TAXIMAP_OPENED');assert(C.nav.route==route and C.taxi.from==301,'opening an earlier master cannot complete the final destination')
     C.taxi={from=303,offers={}};local position=A.Position;A.Position=function() return nil end
-    C.events.scripts.OnEvent(nil,'TAXIMAP_OPENED');assert(C.nav.route==route and not C.arrivalUntil,'cached taxi context cannot stand in for this interaction')
+    dispatchEvent('TAXIMAP_OPENED');assert(C.nav.route==route and not C.arrivalUntil,'cached taxi context cannot stand in for this interaction')
     A.Position=position;C_TaxiMap.GetAllTaxiNodes=function() return {{nodeID=303,state=0,slotIndex=1}} end
-    C.events.scripts.OnEvent(nil,'TAXIMAP_OPENED');assert(C.nav.route==route and not C.taxi,'an unreconciled final node must not complete arrival')
-    playerY=playerY+.25;C.events.scripts.OnEvent(nil,'TAXIMAP_OPENED');assert(not C.nav.route and C.arrivalUntil,'opening the actual reconciled final flight point confirms arrival')
+    dispatchEvent('TAXIMAP_OPENED');assert(C.nav.route==route and not C.taxi,'an unreconciled final node must not complete arrival')
+    playerY=playerY+.25;dispatchEvent('TAXIMAP_OPENED');assert(not C.nav.route and C.arrivalUntil,'opening the actual reconciled final flight point confirms arrival')
     C_TaxiMap.GetAllTaxiNodes,C_TaxiMap.GetTaxiNodesForMap,GetNumRoutes=savedAll,savedMap,savedRoutes;cleanup()
 end)
 test('map projection retains authoritative city coordinates and composes only proven parent map rectangles',function()
@@ -1869,14 +1892,14 @@ test('transmog results compare route select Go and interaction arrival through t
     C:Stop();C.destination=nil;C:Filter('categories','transmog');flushSearch();U.go.scripts.OnClick()
     assert(#C.results==1 and C.results[1].destination==goal and not C.destination,'Compare matches plans the service category')
     C:Go();UnitGUID=function(unit) assert(unit=='npc');return 'Creature-0-1234-0-0-270581-000000ABCD' end
-    C.events.scripts.OnEvent(nil,'GOSSIP_SHOW');assert(not C.nav.route and C.arrivalUntil)
+    dispatchEvent('GOSSIP_SHOW');assert(not C.nav.route and C.arrivalUntil)
     C.profile=profile;C.profiles=profiles;cleanup();C:BindFilters();C:ApplyProfile()
 end)
 -- Re-load the real TOC into a fresh namespace with restored SavedVariables.
 -- Keep these independent lifecycle checks last so earlier interaction fixtures
 -- cannot accidentally supply a hidden flag or pre-created frame at startup.
 local function boot(character,legacy,profiles,provider)
-    timers={}
+    timers={};frames={};SlashCmdList={};SLASH_ASTHECROWFLIES_SND_ATCF1=nil
     AsTheCrowFliesCharacter=N.Model.Copy(character)
     AsTheCrowFliesDB=N.Model.Copy(legacy)
     AsTheCrowFliesProfiles=N.Model.Copy(profiles)
@@ -1888,8 +1911,8 @@ local function boot(character,legacy,profiles,provider)
     end
     local c=fresh.Core
     assert(not c.ready and not fresh.UI.frame,'frames must wait for restored SavedVariables')
-    c.events.scripts.OnEvent(nil,'ADDON_LOADED','AnotherAddon');assert(not c.ready)
-    c.events.scripts.OnEvent(nil,'ADDON_LOADED','AsTheCrowFlies');assert(c.ready)
+    dispatchEvent('ADDON_LOADED','AnotherAddon');assert(not c.ready)
+    dispatchEvent('ADDON_LOADED','AsTheCrowFlies');assert(c.ready)
     return fresh
 end
 local function flushLifecycle()
@@ -1952,7 +1975,7 @@ local function hiddenLifecycle(fresh)
     local function check() assert(c.hidden and not u.frame:IsShown() and not u.handle:IsShown(),'hidden panel or tab reopened') end
     check()
     for _,event in ipairs({'PLAYER_LOGIN','PLAYER_ENTERING_WORLD','UI_SCALE_CHANGED','DISPLAY_SIZE_CHANGED','ADDON_LOADED','TAXIMAP_OPENED','TAXIMAP_CLOSED','GOSSIP_SHOW'}) do
-        c.events.scripts.OnEvent(nil,event,'LibSharedMedia-3.0');flushLifecycle();c:Tick();check()
+        dispatchEvent(event,'LibSharedMedia-3.0');flushLifecycle();c:Tick();check()
     end
 end
 test('fresh and legacy startups stay hidden throughout login and provider completion',function()
@@ -1968,9 +1991,9 @@ end)
 test('explicit hide survives logout reload and login with settings and character knowledge',function()
     local fresh=boot({version=1,build='1.60.1.70338',hidden=false,known={[90]={state='known',faction='Alliance'}},timings={trip={20,22}},places={}},
         {font='Arial',width=420,searchFilters={categories={transmog=true}}})
-    SlashCmdList.ASTHECROWFLIES('show');assert(fresh.UI.frame:IsShown())
-    SlashCmdList.ASTHECROWFLIES('hide');assert(AsTheCrowFliesCharacter.hidden==true)
-    fresh.Core.events.scripts.OnEvent(nil,'PLAYER_LOGOUT')
+    SlashCmdList.ASTHECROWFLIES_SND_ATCF('show');assert(fresh.UI.frame:IsShown())
+    SlashCmdList.ASTHECROWFLIES_SND_ATCF('hide');assert(AsTheCrowFliesCharacter.hidden==true)
+    dispatchEvent('PLAYER_LOGOUT')
     local reloaded=boot(AsTheCrowFliesCharacter,AsTheCrowFliesDB,AsTheCrowFliesProfiles,true)
     hiddenLifecycle(reloaded)
     assert(reloaded.Core.profile.width==420 and reloaded.Core.profile.searchFilters.categories.transmog)
@@ -1986,12 +2009,12 @@ test('show settings buttons and keybinding reveal update the durable visibility 
     assert(reloaded.UI.frame:IsShown() and reloaded.Core.character.hidden==false,'explicit show restores across login')
     reloaded.UI:SetDock(reloaded.Core,'right',true)
     assert(reloaded.UI.handle:IsShown() and AsTheCrowFliesCharacter.hidden==false,'tuck is separate from Hide')
-    SlashCmdList.ASTHECROWFLIES('hide');assert(not reloaded.UI.handle:IsShown())
-    SlashCmdList.ASTHECROWFLIES('show');assert(reloaded.UI.frame:IsShown() and not reloaded.Core.tucked)
+    SlashCmdList.ASTHECROWFLIES_SND_ATCF('hide');assert(not reloaded.UI.handle:IsShown())
+    SlashCmdList.ASTHECROWFLIES_SND_ATCF('show');assert(reloaded.UI.frame:IsShown() and not reloaded.Core.tucked)
 end)
 test('profile placement and options changes cannot reveal a hidden panel',function()
     local fresh=boot();local c,u,o=fresh.Core,fresh.UI,fresh.Options
-    SlashCmdList.ASTHECROWFLIES('opts');assert(o.frame:IsShown());hiddenLifecycle(fresh)
+    SlashCmdList.ASTHECROWFLIES_SND_ATCF('opts');assert(o.frame:IsShown());hiddenLifecycle(fresh)
     for _,entry in ipairs({{'DuplicateProfile','Other'},{'SwitchProfile','Default'},{'CopyProfile','Other'},{'ResetProfile'}}) do
         assert(o:ProfileAction(entry[1],entry[2]));hiddenLifecycle(fresh)
     end
@@ -2146,4 +2169,15 @@ test('dropdown captions retain readable UTF8 text and complete selected identiti
     assert(o:ProfileAction('SwitchProfile','Default'));assert(o.active.Text:GetText()=='Default')
     o.font:SetDefaultText('Arial');o:Layout();assert(o.font.Text:GetText()=='Arial' and not o.font.truncatedCaption)
 end)
+
+-- SND disposal must not suppress the consumer's native ticker cleanup.
+test('SND shutdown cancels subscriptions while native logout cancels navigation ticker',function()
+    local fresh=boot(nil,nil,nil);local c=fresh.Core;local cancelled=false
+    c.ticker.Cancel=function() cancelled=true end
+    dispatchEvent('PLAYER_LOGOUT')
+    assert(cancelled and not fresh.App:IsReady() and not SlashCmdList.ASTHECROWFLIES_SND_ATCF)
+    local changed=0;c.RefreshAppearance=function() changed=changed+1 end
+    dispatchEvent('UI_SCALE_CHANGED');assert(changed==0)
+end)
+
 print('PASS runtime scenarios: '..count..'; frames allocated='..#frames)

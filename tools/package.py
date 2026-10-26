@@ -43,7 +43,13 @@ def build(root=ROOT, local_data=False, release=False):
     # in the TOC sends Binding elements to the ordinary UI XML parser.
     if 'Bindings.xml' in members:
         raise ValueError('Bindings.xml is loaded automatically and must not be listed in the TOC')
-    expected = {'AsTheCrowFlies.toc', 'Bindings.xml', *members, *(f'Media/{name}.tga' for name in MEDIA)}
+    expected = {'Libs/SomethingNeedDoing/LICENSE', 'Libs/SomethingNeedDoing/UPSTREAM.json', 'AsTheCrowFlies.toc', 'Bindings.xml', *members, *(f'Media/{name}.tga' for name in MEDIA)}
+    upstream = addon / "Libs/SomethingNeedDoing"
+    pin = json.loads((upstream / "UPSTREAM.json").read_text())
+    assert pin["version"] == "0.2.0" and pin["commit"] == "de2f518abad622f94aca7ad25599277544379fcd"
+    assert set(pin["sha256"]) == {"Core.lua", "Diagnostics.lua", "Scope.lua", "State.lua", "Settings.lua", "UI.lua", "Options.lua", "LICENSE"}
+    for name, checksum in pin["sha256"].items():
+        assert hashlib.sha256((upstream / name).read_bytes()).hexdigest() == checksum, name
     for name in expected:
         if Path(name).is_absolute() or '\\' in name or '..' in Path(name).parts:
             raise ValueError('Unsafe addon path')

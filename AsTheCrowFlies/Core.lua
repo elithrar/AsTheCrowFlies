@@ -1,5 +1,13 @@
 local ADDON,N=...;local M,A,R,V=N.Model,N.Adapter,N.Routes,N.Navigation
 local C={nav=V.New(),destinations={},filter={categories={},classes={},professions={}},results={},selected=1,searchGeneration=0};N.Core=C
+-- SND owns ordinary subscriptions; gameplay and SavedVariables retain their existing owners.
+local app = N.SomethingNeedDoing:NewAddon(ADDON, {version="0.1.8"})
+N.App = app
+local scope = app:Scope("core")
+local function required(ok, result)
+    if not ok then error(ADDON .. ": " .. result.message) end
+    return result
+end
 function C:BindFilters(refresh)
     self.profile.searchFilters=self.profile.searchFilters or {categories={},classes={},professions={}}
     self.filter=self.profile.searchFilters
@@ -298,7 +306,7 @@ function C:Initialize()
     self.status=self.character.intent and "Previous route stopped on reload. Choose a destination to resume." or nil
     if self.build~=N.Data.build then self.status="Unvalidated client build: flight data disabled" end
     self:Refresh()
-    if hooksecurefunc and TakeTaxiNode then hooksecurefunc("TakeTaxiNode",function(slot) self:TaxiSelected(slot) end) end
+    if hooksecurefunc and TakeTaxiNode then required(scope:PostHook("TakeTaxiNode",function(slot) self:TaxiSelected(slot) end)) end
     self.ticker=C_Timer.NewTicker(.25,function() self:Tick() end)
     local provider,message=N.Providers.Connect();self.provider=provider;self.providerStatus=message or "Indexing Forever NPCs..."
     if provider then
@@ -319,17 +327,15 @@ function C:Initialize()
     end
 end
 local frame=CreateFrame("Frame");C.events=frame
-for _,event in ipairs({"ADDON_LOADED","TAXIMAP_OPENED","TAXIMAP_CLOSED","PLAYER_LOGIN","PLAYER_ENTERING_WORLD","PLAYER_LOGOUT","UI_SCALE_CHANGED","DISPLAY_SIZE_CHANGED"}) do frame:RegisterEvent(event) end
 local npcEvents={}
 for _,event in ipairs({"GOSSIP_SHOW","QUEST_GREETING","QUEST_DETAIL","QUEST_PROGRESS","QUEST_COMPLETE","TRAINER_SHOW","MERCHANT_SHOW","BANKFRAME_OPENED","AUCTION_HOUSE_SHOW"}) do
-    npcEvents[event]=true;frame:RegisterEvent(event)
+    npcEvents[event]=true
 end
 local npcInteractionTypes={};local interactionTypes=Enum and Enum.PlayerInteractionType
 for _,name in ipairs({"Gossip","QuestGiver","Merchant","TaxiNode","Trainer","Banker","Vendor","Auctioneer","StableMaster"}) do
     local value=interactionTypes and interactionTypes[name];if A.Number(value) then npcInteractionTypes[value]=true end
 end
-if next(npcInteractionTypes) then A.Call(frame.RegisterEvent,frame,"PLAYER_INTERACTION_MANAGER_FRAME_SHOW") end
-frame:SetScript("OnEvent",function(_,event,arg)
+local function onEvent(_,event,arg)
     if event=="ADDON_LOADED" and arg==ADDON then C:Initialize()
     elseif C.ready then
         if event=="ADDON_LOADED" then N.UI:WatchFonts()
@@ -351,9 +357,19 @@ frame:SetScript("OnEvent",function(_,event,arg)
         elseif event=="PLAYER_LOGOUT" then if C.ticker then C.ticker:Cancel() end
         elseif event=="UI_SCALE_CHANGED" or event=="DISPLAY_SIZE_CHANGED" then C:RefreshAppearance(false) end
     end
-end)
-SLASH_ASTHECROWFLIES1="/atcf"
-SlashCmdList.ASTHECROWFLIES=function(text)
+end
+for _,event in ipairs({"ADDON_LOADED","TAXIMAP_OPENED","TAXIMAP_CLOSED","PLAYER_LOGIN","PLAYER_ENTERING_WORLD","PLAYER_LOGOUT","UI_SCALE_CHANGED","DISPLAY_SIZE_CHANGED"}) do
+    if event ~= "PLAYER_LOGOUT" then required(scope:Event(event, function(...) onEvent(nil,event,...) end)) end
+end
+for event in pairs(npcEvents) do required(scope:Event(event, function(...) onEvent(nil,event,...) end)) end
+if next(npcInteractionTypes) then
+    local ok, err = scope:Event("PLAYER_INTERACTION_MANAGER_FRAME_SHOW", function(...) onEvent(nil,"PLAYER_INTERACTION_MANAGER_FRAME_SHOW",...) end)
+    if not ok then app.log:Warn(err.message) end
+end
+-- Native logout cleanup remains available after SND cancels ordinary subscriptions.
+frame:RegisterEvent("PLAYER_LOGOUT")
+frame:SetScript("OnEvent", onEvent)
+local slashOK, slashError = app:Slash("/atcf", function(text)
     if not C.ready then return end
     local cmd,rest=(text or ""):match("^%s*(%S*)%s*(.-)$");cmd=cmd:lower()
     if cmd=="stop" then C:Stop()
@@ -364,6 +380,7 @@ SlashCmdList.ASTHECROWFLIES=function(text)
         local point=N.Providers.Remember(C.character,A.Position(),rest~="" and rest or (GetZoneText() or "Saved place"))
         C:Reindex();C.status=point and "Location saved" or "Location unavailable";C:Refresh()
     else C.status="Use /atcf options, show, hide or stop.";C:Refresh() end
-end
+end)
+if not slashOK then app.log:Warn("Slash command unavailable", {command="/atcf", reason=slashError.message}) end
 N.Toggle=function() if C.ready then N.UI:Toggle(C) end end
 _G.AsTheCrowFlies_Toggle=N.Toggle
