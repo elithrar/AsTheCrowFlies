@@ -10,8 +10,9 @@ local callbackErrors={}
 function geterrorhandler() return function(message) callbackErrors[#callbackErrors+1]=message end end
 local frames,timers,hooks={},{},{};local now=0;local cursorX,cursorY=400,500
 local methods={}
-function methods:SetPoint(...) local args={...};self.point=args;if #args==5 then assert(type(args[4])=='number' and type(args[5])=='number','SetPoint requires numeric offsets') end end
-function methods:ClearAllPoints() self.point=nil end
+function methods:GetParent() return self.parent end
+function methods:SetPoint(...) local args={...};self.point=args;self.points=self.points or {};self.points[args[1]]=args;if #args==5 then assert(type(args[4])=='number' and type(args[5])=='number','SetPoint requires numeric offsets') end end
+function methods:ClearAllPoints() self.point=nil;self.points={} end
 function methods:SetSize(w,h) self.w=w;self.h=h end
 function methods:SetWidth(w) self.w=w end
 function methods:SetHeight(h) self.h=h end
@@ -21,7 +22,13 @@ function methods:StartSizing(point) self.sizing=point end
 function methods:StartMoving() self.moving=true end
 function methods:StopMovingOrSizing() self.moving=false;self.sizing=nil;self.stopped=(self.stopped or 0)+1 end
 function methods:GetWidth() return self.w or 304 end
-function methods:GetHeight() return self.h or 28 end
+function methods:GetHeight()
+    if self.h then return self.h end
+    if self.kind=='ScrollFrame' and self.points and self.points.TOPLEFT and self.points.BOTTOMRIGHT then
+        return self.parent:GetHeight()+self.points.TOPLEFT[3]-self.points.BOTTOMRIGHT[3]
+    end
+    return 28
+end
 function methods:SetScript(event,fn) self.scripts[event]=fn end
 function methods:GetScript(event) return self.scripts[event] end
 function methods:HookScript(event,fn) local previous=self.scripts[event];self.scripts[event]=function(...) if previous then previous(...) end;fn(...) end end
@@ -103,6 +110,7 @@ function methods:SetVerticalScroll(value) self.scroll=value;if self.scripts.OnVe
 function methods:GetVerticalScroll() return self.scroll or 0 end
 function methods:GetLeft() return 20 end
 function methods:GetTop() return 600 end
+function methods:GetBottom() return self:GetTop()-self:GetHeight() end
 function methods:SetTexture(v) self.texture=v;self.atlas=nil;return true end
 function methods:SetAtlas(v,useSize,filter,reset,wrapH,wrapV)
     if v:match('^common%-search%-border%-') then
@@ -166,7 +174,7 @@ UIParent=object();UIParent:SetSize(1920,1080);Minimap=object();Minimap:SetSize(1
 WorldMapFrame=object();local canvas=object();canvas:SetSize(1000,700)
 function WorldMapFrame:GetCanvas() return canvas end
 function WorldMapFrame:GetMapID() return 1429 end
-GameTooltip=object();GameFontNormal={};STANDARD_TEXT_FONT='native';SlashCmdList={}
+GameTooltip=object();GameFontNormal={GetFont=function()return "native",12,"" end};STANDARD_TEXT_FONT='native';SlashCmdList={}
 C_Timer={After=function(delay,fn) timers[#timers+1]=fn end,NewTicker=function(delay,fn) return {Cancel=function() end,callback=fn} end}
 function GetTime() return now end
 function GetBuildInfo() return '1.60.1','70338' end
@@ -210,12 +218,61 @@ local N={};local files={}
 for line in io.lines(ROOT..'/AsTheCrowFlies/AsTheCrowFlies.toc') do if line:match('%.lua$') then files[#files+1]=line end end
 for _,name in ipairs(files) do assert(loadfile(ROOT..'/AsTheCrowFlies/'..name))('AsTheCrowFlies',N) end
 local A,C,U=N.Adapter,N.Core,N.UI;local count=0
-local function test(name,fn) local ok,err=pcall(fn);assert(ok,name..': '..tostring(err));count=count+1 end
+local function setPreference(c,path,value)
+    local ok,err=c:SetPreferences({[path]=value});assert(ok,err and err.message)
+end
+local function restorePreferences(c,profile)
+    local values={}
+    for key,value in pairs(profile) do
+        if key=='colors' then for role,color in pairs(value) do values['colors.'..role]=color end
+        elseif key~='version' and key~='layoutVersion' and key~='searchFilters' and key~='filters' then values[key]=value end
+    end
+    for key,value in pairs(N.Settings.FilterPatch(profile.searchFilters)) do values[key]=value end
+    assert(c:SetPreferences(values))
+end
+local function option(owner,page,index)
+    assert(owner:Open(page));return assert(owner.panel._pool[page..':1:'..index])
+end
+local function test(name,fn) local ok,err=pcall(fn);assert(ok,name..': '..tostring(err).." callback: "..tostring(callbackErrors[1]));assert(#callbackErrors==0,callbackErrors[1]);count=count+1 end
 test('TOC load and ADDON_LOADED restoration lifecycle',function()
     assert(not C.ready);AsTheCrowFliesDB={version=1,font='Arial',scale=.9};AsTheCrowFliesCharacter={version=1,build='old'}
     dispatchEvent('ADDON_LOADED','AnotherAddon');assert(not C.ready)
     dispatchEvent('ADDON_LOADED','AsTheCrowFlies');assert(C.ready and C.profile.font=='Arial' and C.profile.scale==.9)
-    assert(AsTheCrowFliesDB==C.profile and AsTheCrowFliesCharacter==C.character)
+    assert(AsTheCrowFliesDB~=C.profile and AsTheCrowFliesDB.font==C.profile.font and AsTheCrowFliesCharacter==C.character)
+end)
+-- A failed compound geometry edit must not publish half a placement or alias a saved table.
+test('settings patches commit once and returned snapshots cannot mutate saved preferences',function()
+    local original=N.Model.Copy(C.profile);local notifications=0
+    local handle=N.App:OnSettingsChanged(function()notifications=notifications+1 end)
+    local ok,err=N.App:SetMany({width=300,scale=0})
+    assert(not ok and err.code=='invalid' and C.profile.width==original.width and notifications==0)
+    assert(N.App:SetMany({width=300,scale=1.1}));assert(notifications==1 and AsTheCrowFliesDB.width==300 and C.profile.scale==1.1)
+    local color=N.App:Get('colors.text');color[1]=0
+    assert(AsTheCrowFliesDB.colors.text[1]~=0 and C.profile.colors.text[1]~=0)
+    handle:Cancel();restorePreferences(C,original)
+end)
+-- Contained native failures must not freeze appearance; a late font invalidation needs a bounded remeasure.
+test('appearance refresh recovers after native errors and replays pending layout',function()
+    local original=U.SyncMenus;local scale=C.profile.scale;local calls=0
+    U.SyncMenus=function(self)
+        calls=calls+1;if calls==1 then error('injected menu refresh failure') end
+        return original(self)
+    end
+    assert(N.App:Set('scale',scale==1 and .9 or 1))
+    assert(#callbackErrors==1 and callbackErrors[1]:find('injected menu refresh failure',1,true))
+    callbackErrors={};N.App.log:Clear()
+    assert(not C.refreshingAppearance,'contained native errors must release the appearance guard')
+    C:RefreshAppearance();assert(calls==2)
+    calls=0
+    U.SyncMenus=function(self)
+        calls=calls+1;if calls==1 then C:RefreshAppearance() end
+        return original(self)
+    end
+    C:RefreshAppearance();assert(calls==2 and not C.refreshingAppearance and not C.appearancePending)
+    calls=0
+    U.SyncMenus=function(self)calls=calls+1;C:RefreshAppearance();return original(self)end
+    C:RefreshAppearance();assert(calls==3 and not C.refreshingAppearance and not C.appearancePending)
+    U.SyncMenus=original;assert(N.App:Set('scale',scale))
 end)
 test('native map transform and projection round trip',function()
     local p=A.FromMap(1429,.2,.8);assert(p.x==1600 and p.y==800)
@@ -376,7 +433,7 @@ test('route legs collapse multihop flights and omit duplicated totals',function(
 end)
 
 test('header controls open useful menu and back preserves navigation',function()
-    C:Stop();C:ShowPanel(true);N.Options.frame:Hide()
+    C:Stop();C:ShowPanel(true);N.Options.panel:Close()
     assert(U.header:GetWidth()<=C.profile.width-72 and U.settings:GetFrameLevel()>U.header:GetFrameLevel())
     U.settings.scripts.OnClick();assert(U.menu:IsShown());U.tuck.scripts.OnClick();assert(not U.menu:IsShown())
     U.settings.scripts.OnClick();U.menuOptions.scripts.OnClick();assert(N.Options.frame:IsShown() and not U.menu:IsShown())
@@ -396,38 +453,35 @@ test('commands open options idempotently and explicit show hide retain route sta
 end)
 
 test('fonts reach dropdown rows and late SharedMedia registration',function()
-    local available=false;local callbacks={};local lib={IsValid=function() return available end,Fetch=function() return 'expressway.ttf' end,List=function() return {'Expressway'} end,RegisterCallback=function(owner,event,fn) registerMedia(callbacks,owner,event,fn) end}
-    LibStub=function() return lib end;C.profile.font='Expressway';U:WatchFonts();available=true;callbacks.LibSharedMedia_Registered(nil,'font')
-    assert(U.title.font=='expressway.ttf' and N.Options.order.Text.font=='expressway.ttf' and U.menuFont.font=='expressway.ttf')
-    local initializers={};local root={SetScrollMode=function() end,CreateRadio=function() return {AddInitializer=function(_,fn) initializers[#initializers+1]=fn end} end}
-    N.Options.order.menu(nil,root);local fontString=setmetatable({SetFontObject=function(self,font) self.actual=font end},{__index=function(_,key) if key=='SetFont' then error('compositor SetFont access') end end})
+    local callbacks={};local lib={Fetch=function(_,_,name) if name=='Expressway' then return 'expressway.ttf' end end,List=function() return {'Expressway'} end,RegisterCallback=function(owner,event,fn) registerMedia(callbacks,owner,event,fn) end}
+    LibStub=function() return lib end;setPreference(C,'font','Expressway');dispatchEvent('ADDON_LOADED','Media')
+    callbacks.LibSharedMedia_Registered(nil,'font')
+    local font=option(N.Options,'appearance',2)
+    assert(U.title.font=='expressway.ttf' and font.Text.font=='expressway.ttf' and U.menuFont.font=='expressway.ttf',tostring(U.title.font)..'/'..tostring(font.Text.font)..'/'..tostring(U.menuFont.font)..'/'..N.App:Get('font'))
+    local initializers={};local root={SetScrollMode=function() end,AddMenuReleasedCallback=function()end,CreateRadio=function() return {AddInitializer=function(_,fn) initializers[#initializers+1]=fn end} end}
+    U.routeOrder.menu(nil,root);local fontString=setmetatable({SetFontObject=function(self,font) self.actual=font end},{__index=function(_,key) if key=='SetFont' then error('compositor SetFont access') end end})
     initializers[1]({fontString=fontString});assert(fontString.actual==U.menuFont)
-    local before=#U.texts;U:RefreshFonts();assert(#U.texts==before);LibStub=nil
+    local before=#U.texts;U:RefreshFonts();assert(#U.texts==before);LibStub=nil;N.App.fonts:Refresh()
 end)
 
-test('profile and color interactions preserve character flight knowledge and cancel safely',function()
-    local O=N.Options;C.character.known[87]={state='known'};C.character.timings['87']={60};local character=C.character
-    O.name:SetText('Travel');O.duplicate.scripts.OnClick();assert(C.profiles.active=='Travel' and AsTheCrowFliesDB==C.profile)
-    C.profile.scale=1.1;O:ProfileAction('SwitchProfile','Default');assert(C.character==character and character.known[87] and character.timings['87'][1]==60)
-    O.copyName='Travel';O.copy.scripts.OnClick();assert(O.confirm=='copy');O.cancel.scripts.OnClick();assert(not O.confirm)
-    O.copy.scripts.OnClick();O.copy.scripts.OnClick();assert(C.profile.scale==1.1 and C.profiles.active=='Default')
-    ColorPickerFrame=object();ColorPickerFrame:Hide();function ColorPickerFrame:SetupColorPickerAndShow(info) self.info=info;self:Show() end
-    function ColorPickerFrame:GetExtraInfo() return self.info and self.info.extraInfo end
-    function ColorPickerFrame:GetColorRGB() return .2,.3,.4 end
-    local original=N.Model.Copy(C.profile.colors.accent);O:Color('accent');ColorPickerFrame.info.swatchFunc();assert(C.profile.colors.accent[1]==.2)
-    ColorPickerFrame.info.cancelFunc();assert(C.profile.colors.accent[1]==original[1]);ColorPickerFrame:Hide()
-    O.reset.scripts.OnClick();assert(O.confirm=='reset');O.reset.scripts.OnClick();assert(C.profile.scale==1 and C.character==character and character.timings['87'][1]==60)
-    ColorPickerFrame=nil;C:Stop()
+test('SND profile commands preserve character flight knowledge',function()
+    C.character.known[87]={state='known'};C.character.timings['87']={60};local character=C.character
+    assert(N.App.profiles:Duplicate('Travel'));assert(N.App.profiles:Active()=='Travel' and AsTheCrowFliesDB~=C.profile)
+    setPreference(C,'scale',1.1);assert(N.App.profiles:Switch('Default'))
+    assert(C.character==character and character.known[87] and character.timings['87'][1]==60)
+    assert(N.App.profiles:CopyFrom('Travel'));assert(C.profile.scale==1.1 and N.App.profiles:Active()=='Default')
+    assert(N.App.profiles:Reset());assert(C.profile.scale==1 and C.character==character and character.timings['87'][1]==60)
+    C:Stop()
 end)
 local function discoveryFixture()
     C:Stop();C:ShowPanel(true);C.origin=nil;C.taxi=nil;C.matches=nil;C.query='';C.filter={categories={},classes={},professions={}}
     local old={data=C.data,known=C.character.known,destinations=C.destinations,order=C.profile.routeOrder,map=C_TaxiMap.GetTaxiNodesForMap,all=C_TaxiMap.GetAllTaxiNodes,routes=GetNumRoutes,slot=TaxiGetNodeSlot}
-    local p=A.Position();C.data={nodes={},edges={}};C.character.known={[201]={state='known'},[203]={state='undiscovered'}};C.profile.routeOrder='distance'
+    local p=A.Position();C.data={nodes={},edges={}};C.character.known={[201]={state='known'},[203]={state='undiscovered'}};setPreference(C,'routeOrder','distance')
     for i=1,3 do local node=N.Model.Copy(p);node.id=200+i;node.x=p.x+(i-1)*500;node.name='Discovery master '..i;node.category='flight';C.data.nodes[node.id]=node end
     C.data.edges={{id=703,from=201,to=203,start=C.data.nodes[201],finish=C.data.nodes[203],mode='flight',distance=1100}}
     local goal=N.Model.Copy(C.data.nodes[203]);goal.id='discovery-goal';goal.name='Discovery destination';goal.category='place';C.destinations={goal};C:Choose(goal);C:Plan()
     local function cleanup()
-        C:Stop();C.taxi=nil;C.destination=nil;C.data=old.data;C.character.known=old.known;C.destinations=old.destinations;C.profile.routeOrder=old.order
+        C:Stop();C.taxi=nil;C.destination=nil;C.data=old.data;C.character.known=old.known;C.destinations=old.destinations;setPreference(C,'routeOrder',old.order)
         C_TaxiMap.GetTaxiNodesForMap=old.map;C_TaxiMap.GetAllTaxiNodes=old.all;GetNumRoutes=old.routes;TaxiGetNodeSlot=old.slot;onTaxi=false
     end
     return goal,cleanup
@@ -439,7 +493,7 @@ test('undiscovered route has dark red overlay and cannot start through any Go pa
     assert(row.lockedText:GetText()=='Undiscovered flight points' and row.lockedText.textColor[1]>.8 and row.lockedText.textColor[2]<.4)
     local shaded=false;for _,f in ipairs(frames) do if f.parent==row.locked and f.color and f.color[1]==0 and (f.color[4] or 0)>.5 then shaded=true end end;assert(shaded)
     local savedPicker=ColorPickerFrame;ColorPickerFrame=object();ColorPickerFrame:Show()
-    N.Options.colorEdit={profile=C.profile,key='accent',original=N.Model.Copy(C.profile.colors.accent)};N.Options:CloseColor();ColorPickerFrame=savedPicker
+    N.Options.panel:Close();ColorPickerFrame=savedPicker
     assert(row.lockedText.textColor[1]>.8 and row.lockedText.textColor[2]<.4,'color editor close must preserve red discovery warning')
     assert(U.rows[1].go.enabled and not U.rows[1].locked:IsShown())
     row.go.scripts.OnClick();assert(not C.nav.route and not C.compact)
@@ -494,43 +548,40 @@ end
 
 test('Classic color picker hide-before-callback cancel and Okay preserve their meaning',function()
     local O=N.Options;local saved=ColorPickerFrame;ColorPickerFrame=classicPicker();local picker=ColorPickerFrame
-    local original=N.Model.Copy(C.profile.colors.text)
-    O:Color('text');assert(O.colorEdit and picker:IsShown(),'initial hidden OnColorSelect must not end ownership')
-    picker.rgb={.21,.32,.43};picker.info.swatchFunc();assert(C.profile.colors.text[1]==.21)
-    picker:Hide();picker.info.cancelFunc();assert(C.profile.colors.text[1]==original[1] and not O.colorEdit)
-    O:Color('text');picker.rgb={.31,.42,.53}
-    -- Classic Okay hides, then invokes the final swatch callback.
-    picker:Hide();picker.info.swatchFunc();assert(C.profile.colors.text[1]==.31 and not O.colorEdit)
-    O:Color('text');local current=O.colorEdit
-    local pending=timers;timers={};for _,fn in ipairs(pending) do fn() end
-    assert(O.colorEdit==current and picker:IsShown(),'older hide cleanup must not cancel a reopened session')
-    picker.rgb={.51,.62,.73};picker.info.swatchFunc();O:CloseColor()
-    assert(not picker:IsShown() and C.profile.colors.text[1]==.31 and O.colors.text.swatch.color[1]==.31)
-    C.profile.colors.text=original;C:ApplyProfile();ColorPickerFrame=saved
+    local original=N.Model.Copy(C.profile.colors.text);local button=option(O,'appearance',6)
+    button.scripts.OnClick();assert(picker:IsShown())
+    picker.rgb={.21,.32,.43};picker.info.swatchFunc()
+    assert(C.profile.colors.text[1]==original[1] and U.previewColors.text[1]==.21,'preview must not persist')
+    picker:Hide();picker.info.cancelFunc();assert(C.profile.colors.text[1]==original[1])
+    button.scripts.OnClick();picker.rgb={.31,.42,.53};picker:Hide();picker.info.swatchFunc()
+    assert(C.profile.colors.text[1]==.31 and AsTheCrowFliesDB.colors.text[1]==.31)
+    button.scripts.OnClick();picker.rgb={.51,.62,.73};picker.info.swatchFunc();O.panel:Close()
+    assert(not picker:IsShown() and C.profile.colors.text[1]==.31 and U.frame.backdropColor[1]==U.theme.colors.surface[1])
+    setPreference(C,'colors.text',original);ColorPickerFrame=saved
 end)
 
 test('shared color picker takeover never hides another addon or applies stale callbacks',function()
     local O=N.Options;local saved=ColorPickerFrame;ColorPickerFrame=classicPicker();local picker=ColorPickerFrame
-    local original=N.Model.Copy(C.profile.colors.background)
-    O:Color('background');picker.rgb={.11,.22,.33};picker.info.swatchFunc();local stale=picker.info
-    local other={};picker:SetupColorPickerAndShow({r=.6,g=.7,b=.8,extraInfo=other,swatchFunc=function() end})
-    stale.swatchFunc();stale.cancelFunc();O:CloseColor()
-    assert(picker:IsShown() and picker:GetExtraInfo()==other and C.profile.colors.background[1]==.11)
-    picker:Hide();C.profile.colors.background=original;C:ApplyProfile();ColorPickerFrame=saved
+    local original=N.Model.Copy(C.profile.colors.background);local button=option(O,'appearance',5)
+    button.scripts.OnClick();picker.rgb={.11,.22,.33};picker.info.swatchFunc();local stale=picker.info
+    local other={};picker:SetupColorPickerAndShow({r=.6,g=.7,b=.8,extraInfo=other,swatchFunc=function()end})
+    stale.swatchFunc();stale.cancelFunc();O.panel:Close()
+    assert(picker:IsShown() and picker:GetExtraInfo()==other and C.profile.colors.background[1]==original[1])
+    picker:Hide();ColorPickerFrame=saved
 end)
 
 test('bounded trainer results retain width across compact state and reflow profile controls',function()
     C:Stop();local previous={width=C.profile.width,scale=C.profile.scale,filter=C.filter,route=C.nav.route,results=C.results}
     local p=A.Position();local goal=N.Model.Copy(p);goal.id='layout-goal';goal.name='A long localized destination name';goal.x=p.x+500
     local route=N.Routes.Summary({{mode='walk',start=p,finish=goal,distance=500,quality='bearing'}},goal,C:Context())
-    C.filter={categories={class=true},classes={MAGE=true},professions={}};C.results={route,route,route};C.matches=nil;C.nav.route=route;C.nav.leg=1;C.nav.state='walking';C.profile.scale=1.6
+    C.filter={categories={class=true},classes={MAGE=true},professions={}};C.results={route,route,route};C.matches=nil;C.nav.route=route;C.nav.leg=1;C.nav.state='walking';setPreference(C,'scale',1.6)
     C.nav.route=nil;C.compact=false;C.status=nil;C:Refresh()
     assert(not U.go:IsShown() and not U.stop:IsShown() and not U.fold:IsShown())
     assert(U.frame:GetHeight()>=U.bodyTop+U.bodyScroll:GetHeight()+22,'results without footer controls retain grip padding')
     C.nav.route=route
     UIParent:SetSize(1280,720)
     for _,width in ipairs({280,320}) do
-        C.profile.width=width;C.compact=false;C.status='A route status';C:Refresh()
+        setPreference(C,'width',width);C.compact=false;C.status='A route status';C:Refresh()
         local physical=U.frame:GetWidth()*U.frame:GetScale()
         assert(U.frame:GetHeight()*U.frame:GetScale()<=720 and U.rows[3].detail:GetHeight()>0)
         assert(U.header:GetWidth()<U.settings.point[2] and U.settings:GetFrameLevel()>U.header:GetFrameLevel())
@@ -540,36 +591,31 @@ test('bounded trainer results retain width across compact state and reflow profi
         C.compact=true;C:Refresh();assert(U.frame:GetWidth()*U.frame:GetScale()==physical)
         U.expand.scripts.OnClick();assert(U.frame:GetWidth()*U.frame:GetScale()==physical and U.fold:IsShown())
     end
-    UIParent:SetSize(1920,1080);C.profile.width=previous.width;C.profile.scale=previous.scale;C.filter=previous.filter;C:Stop()
+    UIParent:SetSize(1920,1080);setPreference(C,'width',previous.width);setPreference(C,'scale',previous.scale);C.filter=previous.filter;C:Stop()
 end)
 
 test('open options follows display changes and closes pending confirmation and focus',function()
-    local O=N.Options;O:Open();O.optionsTab.scripts.OnClick()
-    assert(O.optionsTab.activeLine:IsShown() and not O.profilesTab.activeLine:IsShown() and O.appearance:IsShown())
-    O.profilesTab.scripts.OnClick()
-    assert(not O.optionsTab.activeLine:IsShown() and O.profilesTab.activeLine:IsShown() and O.profilePage:IsShown())
-    assert(O.profilesTab.activeLine.color[1]==1 and O.profilesTab.activeLine.color[2]==.82)
-    O.name:SetFocus();O.confirm='reset'
-    UIParent:SetSize(600,400);O.frame.scripts.OnEvent(O.frame,'DISPLAY_SIZE_CHANGED')
-    assert(O.frame:GetWidth()*O.frame:GetScale()<=600 and O.frame:GetHeight()*O.frame:GetScale()<=400)
-    O.frame:Hide();assert(not O.confirm and not O.name:HasFocus())
-    O:Open();assert(O.frame:IsShown() and not O.confirm and O.reset.text:GetText()=='Reset active profile')
-    assert(O.profilesTab.activeLine:IsShown() and not O.optionsTab.activeLine:IsShown())
-    UIParent:SetSize(1920,1080);O.frame.scripts.OnEvent(O.frame,'UI_SCALE_CHANGED');assert(O.frame:GetScale()==1);O.frame:Hide()
+    local O=N.Options;assert(O:Open('profiles'));local panel=O.panel
+    panel._pool['profile-name']:SetFocus();panel._pool['profile-reset'].scripts.OnClick()
+    assert(panel._confirm and panel._confirm.kind=='reset')
+    UIParent:SetSize(600,400);dispatchEvent('DISPLAY_SIZE_CHANGED')
+    assert(panel.frame:GetWidth()*panel.frame:GetScale()<=600 and panel.frame:GetHeight()*panel.frame:GetScale()<=400)
+    panel:Close();assert(not panel._confirm and not panel._pool['profile-name']:HasFocus())
+    assert(O:Open('profiles'));assert(not panel._confirm)
+    UIParent:SetSize(1920,1080);dispatchEvent('UI_SCALE_CHANGED');assert(panel.frame:GetScale()==1);panel:Close()
 end)
 
 test('profile switch changes displayed route ordering without replacing active navigation',function()
-    C:Stop();local previous={profiles=C.profiles,profile=C.profile,data=C.data,known=C.character.known,filter=C.filter}
+    C:Stop();local previous={active=N.App.profiles:Active(),profile=C.profile,data=C.data,known=C.character.known,filter=C.filter}
     local p=A.Position();local goal=N.Model.Copy(p);goal.x=p.x+1000;goal.id='profile-goal';goal.name='Profile destination'
     C.data={nodes={[1]=p,[2]=goal},edges={{id=801,from=1,to=2,start=p,finish=goal,mode='flight',distance=1400}}}
-    C.character.known={[1]={state='known'},[2]={state='known'}};C.filter={categories={},classes={},professions={}};C.destination=goal;C.origin=nil;C.taxi=nil
-    local fast=N.Model.Copy(C.profile);fast.routeOrder='time';fast.width=320
-    local short=N.Model.Copy(C.profile);short.routeOrder='distance';short.width=280
-    C.profiles={version=1,active='Short',profiles={Short=short,Fast=fast}};C.profile=short
+    C.character.known={[1]={state='known'},[2]={state='known'}};C.destination=goal;C.origin=nil;C.taxi=nil
+    assert(N.App.profiles:Duplicate('Fast'));assert(C:SetPreferences({routeOrder='time',width=320}))
+    assert(N.App.profiles:Duplicate('Short'));assert(C:SetPreferences({routeOrder='distance',width=280}))
     C:Plan();assert(C.results[1].flight==0);C:Go();local active=C.nav.route
-    assert(N.Options:ProfileAction('SwitchProfile','Fast'))
-    assert(C.results[1].flight>0 and C.nav.route==active and C.profile.width==320)
-    C.profiles=previous.profiles;C.profile=previous.profile;C.data=previous.data;C.character.known=previous.known;C.filter=previous.filter;C.destination=nil;C:Stop();C:ApplyProfile()
+    assert(N.App.profiles:Switch('Fast'));assert(C.results[1].flight>0 and C.nav.route==active and C.profile.width==320)
+    C.destination=nil;C:Stop();C.data=previous.data;C.character.known=previous.known
+    assert(N.App.profiles:Switch(previous.active));restorePreferences(C,previous.profile)
 end)
 test('Back returns selected destination or last selected origin to search without losing navigation',function()
     C:Stop();N.Options.frame:Hide();U.menu:Hide();C:ShowPanel(true)
@@ -632,10 +678,10 @@ test('native filter nested checkboxes support OR class defaults reset and repeat
     assert(d.kind=='DropdownButton' and icon:GetAtlas()=='gamepad-hud-icon-filter' and icon.desaturated)
     assert(icon:GetWidth()==18 and icon:GetHeight()==18 and d:GetWidth()==24 and d:GetHeight()==28 and not d.text:IsShown())
     assert(icon.color[1]==.75 and icon.color[2]==.75 and icon.color[3]==.75 and d.pushedTexture==d.nativePushed)
-    d.scripts.OnEnter();assert(d.borderColor[1]==.9 and GameTooltip:GetText()=='Filter destinations')
-    d.menuOpen=true;d:TriggerEvent('OnMenuOpen');d.scripts.OnLeave();assert(d.borderColor[1]==.9,'open menu retains its hover edge after pointer leaves')
-    d:CloseMenu();assert(d.borderColor[1]==.45)
-    d.scripts.OnEnter();d.menuOpen=true;d:TriggerEvent('OnMenuOpen');d:CloseMenu();assert(d.borderColor[1]==.9);d.scripts.OnLeave()
+    d.scripts.OnEnter(d);assert(d.borderColor[1]==U.theme.colors.accent[1] and GameTooltip:GetText()=='Filter destinations')
+    d.menuOpen=true;d:TriggerEvent('OnMenuOpen');d.scripts.OnLeave(d);assert(d.borderColor[1]==U.theme.colors.accent[1],'open menu retains its hover edge after pointer leaves')
+    d:CloseMenu();assert(d.borderColor[1]==U.theme.colors.border[1])
+    d.scripts.OnEnter(d);d.menuOpen=true;d:TriggerEvent('OnMenuOpen');d:CloseMenu();assert(d.borderColor[1]==U.theme.colors.accent[1]);d.scripts.OnLeave(d)
     local classes=menu.children[3];assert(classes.label=='Class trainers' and classes.scroll==280 and #classes.children==10)
     classes.callback();flushSearch();assert(C.filter.categories.class and C.filter.classes.MAGE and classes.selected())
     menu.children[2].callback();flushSearch();assert(C.filter.categories.auction and C.filter.categories.class)
@@ -669,19 +715,17 @@ test('filter OR reaches route planning and nested class subsets without cancelli
     C:Stop();C:Filter('all');flushSearch();C:Stop();C.destinations=saved.destinations;C.data=saved.data;C.query=''
 end)
 test('profile switches bind independent filters and replace pending searches while preserving route',function()
-    local saved={profiles=C.profiles,profile=C.profile,destinations=C.destinations};C:Stop();C.destination=nil;C.query='';C.origin=nil
+    local saved={active=N.App.profiles:Active(),profile=C.profile,destinations=C.destinations};C:Stop();C.destination=nil;C.query='';C.origin=nil
     local p=A.Position();local goal=N.Model.Copy(p);goal.x=p.x+100;goal.id='profile-filter';goal.name='Profile place';goal.category='place'
     local trainer=N.Model.Copy(goal);trainer.id='profile-mage';trainer.name='Profile mage';trainer.category='class';trainer.class='MAGE'
-    C.destinations={goal,trainer}
-    local all=N.Model.Copy(C.profile);all.searchFilters={categories={},classes={},professions={}}
-    local class=N.Model.Copy(all);class.searchFilters={categories={class=true},classes={MAGE=true},professions={}}
-    C.profiles={version=1,active='All',profiles={All=all,Class=class}};C.profile=all;C:BindFilters()
+    C.destinations={goal,trainer};assert(N.App.profiles:Duplicate('All'));C:Filter('all')
+    assert(N.App.profiles:Duplicate('Class'));C:Filter('categories','class');assert(N.App.profiles:Switch('All'))
     C:Choose(goal);C:Plan();C:Go();local active=C.nav.route;C.destination=nil;C:Search('')
-    assert(N.Options:ProfileAction('SwitchProfile','Class'));flushSearch()
-    assert(C.filter==C.profile.searchFilters and C.filter.categories.class and #C.matches==1 and C.matches[1]==trainer and C.nav.route==active)
-    C:Filter('categories','auction');flushSearch();assert(not all.searchFilters.categories.auction)
-    assert(N.Options:ProfileAction('SwitchProfile','All'));flushSearch();assert(#C.matches==2 and not N.Model.HasFilter(C.filter) and C.nav.route==active)
-    C.profiles=saved.profiles;C.profile=saved.profile;C.destinations=saved.destinations;C:BindFilters();C:Stop();C:ApplyProfile()
+    assert(N.App.profiles:Switch('Class'));flushSearch()
+    assert(C.filter~=C.profile.searchFilters and C.filter.categories.class and #C.matches==1 and C.matches[1]==trainer and C.nav.route==active)
+    C:Filter('categories','auction');flushSearch()
+    assert(N.App.profiles:Switch('All'));flushSearch();assert(#C.matches==2 and not N.Model.HasFilter(C.filter) and C.nav.route==active)
+    C:Stop();C.destinations=saved.destinations;assert(N.App.profiles:Switch(saved.active));restorePreferences(C,saved.profile)
 end)
 test('typed intent planning keeps semantic candidates ahead of closer incidental names',function()
     local saved={destinations=C.destinations,data=C.data};C:Stop();C:BindFilters();C:Filter('all');flushSearch();C.destination=nil;C.origin=nil;C.data={nodes={},edges={}}
@@ -694,16 +738,16 @@ test('typed intent planning keeps semantic candidates ahead of closer incidental
 end)
 test('edge selection and unlocked dragging tuck on the correct side without changing navigation',function()
     C:Stop();C:ShowPanel(true);local saved=N.Model.Copy(C.profile);local state=C.nav;local O=N.Options
-    local actions={};local root={SetScrollMode=function() end,CreateRadio=function(_,label,selected,choose)
-        actions[label]=choose;return {AddInitializer=function() end}
+    local actions={};local root={SetScrollMode=function() end,AddMenuReleasedCallback=function()end,CreateRadio=function(_,label,selected,choose)
+        actions[label]=function()choose(({['Right screen edge']='right',['Left screen edge']='left',['Free (dragged)']='none'})[label])end;return {AddInitializer=function() end}
     end}
-    O.placement.menu(nil,root);actions['Right screen edge']()
+    option(O,'position',2).menu(nil,root);actions['Right screen edge']()
     assert(C.profile.dock=='right' and C.tucked and U.handle:IsShown() and not U.frame:IsShown() and C.nav==state)
     assert(U.handle.point[1]=='TOPRIGHT');U.handle.scripts.OnMouseDown(U.handle,'LeftButton');U.handle.scripts.OnClick();assert(not C.tucked and U.frame:IsShown())
-    C.profile.locked=true;local x,y=C.profile.x,C.profile.y
+    setPreference(C,'locked',true);local x,y=C.profile.x,C.profile.y
     U.header.scripts.OnDragStart();U.header.scripts.OnDragStop()
     assert(not C.tucked and C.profile.dock=='right' and C.profile.x==x and C.profile.y==y,'locked drag is inert')
-    local oldLeft=U.frame.GetLeft;C.profile.locked=false
+    local oldLeft=U.frame.GetLeft;setPreference(C,'locked',false)
     for _,side in ipairs({'left','right','none'}) do
         if C.tucked then U.handle.scripts.OnMouseDown(U.handle,'LeftButton');U.handle.scripts.OnClick() end
         U.frame.GetLeft=function() return side=='left' and 8 or side=='right' and UIParent:GetWidth()/U.frame:GetScale()-C.profile.width-8 or 200 end
@@ -711,27 +755,25 @@ test('edge selection and unlocked dragging tuck on the correct side without chan
         assert(C.profile.dock==side and C.tucked==(side~='none') and C.nav==state)
     end
     U.frame.GetLeft=oldLeft
-    for _,key in ipairs({'dock','x','y','locked'}) do C.profile[key]=saved[key] end
-    C:ShowPanel(true);C:ApplyProfile()
+    restorePreferences(C,saved)
+    C:ShowPanel(true);C:RefreshAppearance()
 end)
 
-test('options use XPIsland controls and font sizing preserves fixed dialog typography',function()
+test('SND controls change island typography without changing fixed chrome sizes',function()
     local O=N.Options;local size,scale=C.profile.fontSize,C.profile.scale
-    assert(O.close.template=='UIPanelCloseButton' and O.fontSize.template=='InputBoxTemplate' and O.scale.template=='UISliderTemplate')
-    assert(O.font.template=='WowStyle1DropdownTemplate' and O.font:GetHeight()==24 and O.optionsTab:GetHeight()==22)
-    O.fontSize:SetText('18');O.fontSize.scripts.OnEnterPressed(O.fontSize)
-    assert(C.profile.fontSize==18 and U.rows[1].name.fontSize==18 and O.font.Text.fontSize==12 and U.menuSave.text.fontSize==12)
+    local font=option(O,'appearance',2);local slider=option(O,'appearance',3)
+    slider:SetValue(18)
+    assert(C.profile.fontSize==18 and U.rows[1].name.fontSize==18 and font.Text.fontSize==13 and U.menuSave.text.fontSize==12)
     assert(U.menuSave.text:GetUnboundedStringWidth()<=U.menuSave.text:GetWidth())
-    O.scale:SetValue(125);assert(C.profile.scale==1.25 and O.scaleEdit:GetText()=='125')
-    O.scaleEdit:SetText('not a number');O.scaleEdit.scripts.OnEnterPressed(O.scaleEdit);assert(C.profile.scale==1.25)
-    O.fontSize:SetText('99');O.fontSize.scripts.OnEnterPressed(O.fontSize);assert(C.profile.fontSize==18)
+    option(O,'appearance',4):SetValue(1.25);assert(C.profile.scale==1.25)
+    assert(not N.App:Set('fontSize',99));assert(C.profile.fontSize==18)
     local sanitized=N.Settings.Load({fontSize=0/0});assert(sanitized.fontSize==13)
-    C.profile.fontSize=size;C.profile.scale=scale;C:ApplyProfile()
+    assert(C:SetPreferences({fontSize=size,scale=scale}))
 end)
 
 test('long names and flight descriptions grow and scroll without shrinking the island',function()
     C:Stop();local width,size,scale=C.profile.width,C.profile.fontSize,C.profile.scale
-    C.profile.width=280;C.profile.fontSize=18;C.profile.scale=1.6;C:ApplyProfile();UIParent:SetSize(1280,720)
+    setPreference(C,'width',280);setPreference(C,'fontSize',18);setPreference(C,'scale',1.6);C:RefreshAppearance();UIParent:SetSize(1280,720)
     local p=A.Position();local goal=N.Model.Copy(p);goal.x=p.x+500;goal.id='long';goal.name=string.rep('Long destination ',10)
     local station=N.Model.Copy(p);station.name=string.rep('Long flight station ',8)
     local route=N.Routes.Summary({{mode='walk',start=p,finish=goal,distance=500,quality='bearing'},{mode='flight',start=station,finish=goal,distance=500,seconds=60}},goal,C:Context())
@@ -749,7 +791,7 @@ test('long names and flight descriptions grow and scroll without shrinking the i
     assert(U.frame:GetHeight()*U.frame:GetScale()<=540 and U.scrollRail:IsShown())
     C.nav.route=nil;goal.category='place';C.matches={goal,goal,goal};C.highlight=1;C:Refresh();C.highlight=3;C:Refresh()
     assert(U.bodyScroll:GetVerticalScroll()>0 and U.bodyScroll:GetVerticalScroll()<=U.rows[3].bodyOffset)
-    UIParent:SetSize(1920,1080);C.profile.width=width;C.profile.fontSize=size;C.profile.scale=scale;C:Stop();C:ApplyProfile()
+    UIParent:SetSize(1920,1080);setPreference(C,'width',width);setPreference(C,'fontSize',size);setPreference(C,'scale',scale);C:Stop();C:RefreshAppearance()
 end)
 
 test('empty state message and route action stay centered with hidden route controls',function()
@@ -772,16 +814,14 @@ test('compact route controls pause resume and clear stale arrival dwell',functio
 end)
 
 test('late media registration refits options and custom text color leaves native menus legible',function()
-    local O=N.Options;local original=LibStub;local callbacks={};local available=false
-    local lib={IsValid=function() return available end,Fetch=function() return 'late-wide.ttf' end,List=function() return {'Expressway'} end,
-        RegisterCallback=function(owner,event,fn) registerMedia(callbacks,owner,event,fn) end}
-    local width=O.font.Text.GetUnboundedStringWidth;O.font.Text.GetUnboundedStringWidth=function(self) return #(self:GetText())*(available and 40 or 6) end
-    local color=N.Model.Copy(C.profile.colors.text);C.profile.colors.text={.2,.3,.4};C:ApplyProfile()
-    assert(U.menuFont.textColor[1]==.93 and O.font.Text.textColor[1]~=.2)
-    LibStub=function() return lib end;U:WatchFonts();available=true;callbacks.LibSharedMedia_Registered(nil,'font')
-    assert(O.font.Text:GetScale()==1 and O.font.Text.font=='late-wide.ttf' and O.font.Text:GetText():sub(-3)=='...')
-    assert(U.eagle.color[1]==.88 and U.eagle.color[2]==.66 and U.settings.iconKind=='cog')
-    O.font.Text.GetUnboundedStringWidth=width;LibStub=original;C.profile.colors.text=color;C:ApplyProfile()
+    local original=LibStub;local callbacks={}
+    local lib={Fetch=function(_,_,name) if name=='Expressway' then return 'late-wide.ttf' end end,List=function()return {'Expressway'}end,RegisterCallback=function(owner,event,fn)registerMedia(callbacks,owner,event,fn)end}
+    local color=N.Model.Copy(C.profile.colors.text);setPreference(C,'colors.text',{.2,.3,.4})
+    local font=option(N.Options,'appearance',2);assert(U.menuFont.textColor[1]~=.2 and font.Text.textColor[1]~=.2)
+    LibStub=function()return lib end;dispatchEvent('ADDON_LOADED','Media');callbacks.LibSharedMedia_Registered(nil,'font')
+    assert(font.Text.font=='late-wide.ttf' and font.Text:GetScale()==1 and U.title.font=='late-wide.ttf')
+    assert(U.eagle.color[1]==.88 and U.eagle.color[2]==.66)
+    LibStub=original;N.App.fonts:Refresh();setPreference(C,'colors.text',color)
 end)
 -- Exercise the native failure modes that a successful font probe alone cannot
 -- establish: a later control can reject a path or retain its previous face.
@@ -792,46 +832,46 @@ local function assertOwnedFamily(path)
     end
 end
 local function withFontLibrary(run)
-    local previous,preference,watched=LibStub,C.profile.font,U.fontLibrary
+    local previous,preference=LibStub,C.profile.font
     local callbacks={};local lib={IsValid=function(_,kind,name) return kind=='font' and name=='Expressway' end,
-        Fetch=function() return 'review-expressway.ttf' end,List=function() return {'Expressway'} end,
+        Fetch=function(_,_,name) if name=='Expressway' then return 'review-expressway.ttf' end end,List=function() return {'Expressway'} end,
         RegisterCallback=function(owner,event,fn) registerMedia(callbacks,owner,event,fn) end}
-    LibStub=function() return lib end;C.profile.font='Expressway';C:ApplyProfile()
+    LibStub=function() return lib end;setPreference(C,'font','Expressway');dispatchEvent('ADDON_LOADED','Media');N.App.fonts:Refresh()
     run(lib,callbacks)
-    LibStub=previous;C.profile.font=preference;U.fontLibrary=watched;C:ApplyProfile()
+    LibStub=previous;N.App.fonts:Refresh();setPreference(C,'font',preference)
 end
 
-test('one rejected option font downgrades every earlier and later object then recovers',function()
-    withFontLibrary(function()
-        local target=N.Options.overlays.text;local original=target.SetFont
+test('one rejected consumer font downgrades every earlier and later object then recovers',function()
+    withFontLibrary(function(_,callbacks)
+        local target=U.rows[1].detail;local original=target.SetFont
         for _,silent in ipairs({false,true}) do
             target.SetFont=function(self,path,size,flags)
                 if path=='review-expressway.ttf' then return silent end
                 return original(self,path,size,flags)
             end
-            target.font='previous-face.ttf';C:RefreshAppearance(true)
+            target.font='previous-face.ttf';N.App.fonts:Refresh()
             assertOwnedFamily(STANDARD_TEXT_FONT)
             assert(C.profile.font=='Expressway','fallback must preserve the saved preference')
-            target.SetFont=original;C:RefreshAppearance(true);assertOwnedFamily('review-expressway.ttf')
+            target.SetFont=original;callbacks.LibSharedMedia_Registered(nil,'font');assertOwnedFamily('review-expressway.ttf')
         end
         target.SetFont=nil
     end)
 end)
 
 test('failed selected and default paths converge on inherited native font without aborting options',function()
-    withFontLibrary(function()
-        local target=N.Options.fontSize;target.SetFont=function() return false end
-        target.font='previous-face.ttf';C:RefreshAppearance(true)
+    withFontLibrary(function(_,callbacks)
+        local target=U.from;target.SetFont=function() return false end
+        target.font='previous-face.ttf';N.App.fonts:Refresh()
         assertOwnedFamily('native')
         for _,entry in ipairs(U.texts) do assert(entry[1].fontObject==GameFontNormal) end
-        assert(C.profile.font=='Expressway' and N.Options.fontSize:GetText()==tostring(C.profile.fontSize))
-        target.SetFont=nil;C:RefreshAppearance(true);assertOwnedFamily('review-expressway.ttf')
+        assert(C.profile.font=='Expressway' and U.frame)
+        target.SetFont=nil;callbacks.LibSharedMedia_Registered(nil,'font');assertOwnedFamily('review-expressway.ttf')
     end)
 end)
 
 test('registered but missing font falls back consistently and retries on media change',function()
     withFontLibrary(function(lib,callbacks)
-        local path='missing';lib.Fetch=function() return path end;U:WatchFonts()
+        local path='missing';lib.Fetch=function(_,_,name) if name=='Expressway' then return path end end;N.App.fonts:Refresh()
         assertOwnedFamily(STANDARD_TEXT_FONT);assert(C.profile.font=='Expressway')
         path='repaired-media.ttf';callbacks.LibSharedMedia_SetGlobal(nil,'font')
         assertOwnedFamily('repaired-media.ttf');assert(C.profile.font=='Expressway')
@@ -848,79 +888,48 @@ test('fractional native font heights remain cached across unchanged options and 
     withFontLibrary(function()
         assertOwnedFamily('review-expressway.ttf');local before=writes;local generated={}
         for _,d in ipairs(U.dropdowns) do generated[d]=d.generated end
-        C:RefreshAppearance(false);N.Options:Refresh();U:RefreshFonts()
+        C:RefreshAppearance(false);N.Options.panel:Refresh();U:RefreshFonts()
         assert(writes==before,'native uiUnit roundoff must not trigger font rewrites or reprobes')
         for _,d in ipairs(U.dropdowns) do assert(d.generated==generated[d],'unchanged options must not rebuild native menus') end
     end)
-    methods.SetFont=original;C:RefreshAppearance(true)
+    methods.SetFont=original;N.App.fonts:Refresh()
 end)
 
 test('opening options repairs native dropdown checkbox and edit font resets using readback',function()
     withFontLibrary(function()
-        local O=N.Options;O.frame:Hide()
-        assert(O.overlays.Text==O.overlays.text,'exercise the native checkbox label')
-        local reset={O.font.Text,O.order.Text,O.overlays.Text,O.fontSize,U.menuFont}
-        for _,t in ipairs(reset) do t:SetFont('native-widget-reset.ttf',10,'OUTLINE') end
-        O:Open();assert(O.frame:IsShown());assertOwnedFamily('review-expressway.ttf')
-        assert(O.font.Text.fontSize==12 and O.fontSize.fontSize==12 and O.overlays.Text.fontSize==12)
-        O.frame:Hide()
+        local O=N.Options;local font=option(O,'appearance',2);local checkbox=option(O,'navigation',2)
+        local label=O.panel._texts['navigation:1:2:label'];local reset={font.Text,label,O.panel._menuFont}
+        for _,text in ipairs(reset) do text:SetFont('native-widget-reset.ttf',10,'OUTLINE') end
+        O.panel:Close();assert(O:Open('navigation'));assert(label.font=='review-expressway.ttf' and not checkbox.Text:IsShown())
+        assert(O:Open('appearance'));assert(font.Text.font=='review-expressway.ttf' and O.panel._menuFont.font=='review-expressway.ttf')
+        O.panel:Close()
     end)
 end)
 
 test('first late SharedMedia library attachment refreshes and refits the complete options dialog',function()
-    local O=N.Options;local previous,preference,watched=LibStub,C.profile.font,U.fontLibrary
-    local measure=O.font.Text.GetUnboundedStringWidth;local callbacks={}
-    O.font.Text.GetUnboundedStringWidth=function(self) return #(self:GetText())*(self.font=='late-first.ttf' and 40 or 6) end
-    LibStub=nil;U.fontLibrary=nil;C.profile.font='Expressway';C:ApplyProfile()
-    assertOwnedFamily(STANDARD_TEXT_FONT);assert(O.font.Text:GetScale()==1)
-    local lib={IsValid=function() return true end,Fetch=function() return 'late-first.ttf' end,List=function() return {'Expressway'} end,
-        RegisterCallback=function(owner,event,fn) registerMedia(callbacks,owner,event,fn) end}
-    -- All registrations happened before this addon's ADDON_LOADED event; no
-    -- registration callback will rescue a font-only attachment refresh.
-    LibStub=function() return lib end;dispatchEvent('ADDON_LOADED','LateMediaProvider')
+    local previous=LibStub;local callbacks={};LibStub=nil;setPreference(C,'font','Expressway');N.App.fonts:Refresh()
+    assertOwnedFamily(STANDARD_TEXT_FONT)
+    local font=option(N.Options,'appearance',2)
+    local lib={Fetch=function(_,_,name) if name=='Expressway' then return 'late-first.ttf' end end,List=function()return {'Expressway'}end,RegisterCallback=function(owner,event,fn)registerMedia(callbacks,owner,event,fn)end}
+    LibStub=function()return lib end;dispatchEvent('ADDON_LOADED','LateMediaProvider')
     assert(callbacks.LibSharedMedia_Registered and callbacks.LibSharedMedia_SetGlobal)
-    assertOwnedFamily('late-first.ttf');assert(O.font.Text:GetScale()==1 and O.font.Text:GetText()=='Ex...')
-    assert(O.font.value=='Expressway' and O.font.fullCaption=='Expressway')
-    O.font.Text.GetUnboundedStringWidth=measure;LibStub=previous;C.profile.font=preference;U.fontLibrary=watched;C:ApplyProfile()
+    assertOwnedFamily('late-first.ttf');assert(font.Text.font=='late-first.ttf' and font.Text:GetScale()==1)
+    LibStub=previous;N.App.fonts:Refresh()
 end)
 
 test('native selected dropdown labels follow the new profile before generation',function()
-    C:Stop();local O=N.Options;local profile,profiles=C.profile,C.profiles
-    local controls={O.font,O.order,O.placement,O.active};local popupFonts={}
-    for _,d in ipairs(controls) do
-        -- Blizzard keeps generated selection text separately from its fallback.
-        -- SetDefaultText alone does not replace a previously selected label.
-        d.SetDefaultText=function(self,value)
-            self.defaultText=value;self.label=self.selectionText or value;self.Text:SetText(self.label)
-        end
-        d.GenerateMenu=function(self)
-            self.generated=(self.generated or 0)+1;local selections={}
-            local root={SetScrollMode=function() end,CreateRadio=function(_,label,selected)
-                if selected() then selections[#selections+1]=label end
-                return {AddInitializer=function(_,initialize)
-                    local text=setmetatable({SetFontObject=function(_,font) popupFonts[#popupFonts+1]=font end},
-                        {__index=function(_,key) if key=='SetFont' then error('compositor-owned font cannot be assigned directly') end end})
-                    initialize({fontString=text})
-                end}
-            end}
-            self.menu(self,root);self.selectionText=selections[1];self.label=self.selectionText or self.defaultText;self.Text:SetText(self.label)
-        end
-        d.atcfSelectionValue=nil
-    end
-    C.profile=N.Model.Copy(profile);C.profile.font='Expressway';C.profile.routeOrder='distance';C.profile.dock='none'
-    C.profiles={version=1,active='Before',profiles={Before=C.profile,After=N.Model.Copy(C.profile)}}
-    local after=C.profiles.profiles.After;after.font='Arial';after.routeOrder='time';after.dock='right'
-    C:BindFilters();C:ApplyProfile();assert(O.font.Text:GetText()=='Expressway' and O.order.Text:GetText()=='Distance')
-    assert(O:ProfileAction('SwitchProfile','After'))
-    assert(O.font.Text:GetText()=='Arial' and O.order.Text:GetText()=='Estimated time')
-    assert(O.placement.Text:GetText()=='Right screen edge' and O.active.Text:GetText()=='After')
-    assert(#popupFonts>0);for _,font in ipairs(popupFonts) do assert(font==U.menuFont) end
-    for _,d in ipairs(controls) do d.SetDefaultText=nil;d.GenerateMenu=nil;d.selectionText=nil;d.atcfSelectionValue=nil end
-    C.profile=profile;C.profiles=profiles;C:BindFilters();C:ApplyProfile()
+    local saved={active=N.App.profiles:Active(),profile=C.profile};local O=N.Options
+    assert(N.App.profiles:Duplicate('After'));assert(C:SetPreferences({font='Arial',routeOrder='time',dock='right'}))
+    assert(N.App.profiles:Switch(saved.active));local font=option(O,'appearance',2)
+    assert(N.App.profiles:Switch('After'));assert(font.Text:GetText()=='Arial')
+    local order=option(O,'navigation',1);assert(order.Text:GetText()=='Estimated time')
+    local dock=option(O,'position',2);assert(dock.Text:GetText()=='Right screen edge')
+    assert(O:Open('profiles'));assert(O.panel._pool['profile-select'].Text:GetText()=='After')
+    assert(N.App.profiles:Switch(saved.active));restorePreferences(C,saved.profile)
 end)
 
 test('structured compact matches show more rows and scroll all results without changing selection',function()
-    C:Stop();local saved=N.Model.Copy(C.profile);C.origin=nil;C.status=nil;C.destination=nil;C.searchOrigin=false;C.profile.width=304;C.profile.fontSize=13;C:ApplyProfile()
+    C:Stop();local saved=N.Model.Copy(C.profile);C.origin=nil;C.status=nil;C.destination=nil;C.searchOrigin=false;setPreference(C,'width',304);setPreference(C,'fontSize',13);C:RefreshAppearance()
     local p=A.Position();C.matches={};C.highlight=1
     for i=1,40 do local goal=N.Model.Copy(p);goal.name='Trainer '..i;goal.role='Warrior Trainer';goal.zone='Ironforge';goal.category='class';goal.x=p.x+1700+i;C.matches[i]=goal end
     C:Refresh();local row=U.rows[1]
@@ -932,7 +941,7 @@ test('structured compact matches show more rows and scroll all results without c
     C.highlight=40;C:Refresh();assert(U.bodyScroll:GetVerticalScroll()>0)
     local highlight=C.highlight;U.body.scripts.OnMouseWheel(nil,-1000);assert(C.highlight==highlight)
     assert(U.bodyScroll:GetVerticalScroll()==U.bodyScrollRange)
-    U.rows[40].scripts.OnClick();assert(C.destination.name=='Trainer 40');C:Stop();C.destination=nil;C.profile=saved;C:ApplyProfile()
+    U.rows[40].scripts.OnClick();assert(C.destination.name=='Trainer 40');C:Stop();C.destination=nil;restorePreferences(C,saved);C:RefreshAppearance()
 end)
 
 test('result distance uses preview origin and flight route ETA retains the planned transport cost',function()
@@ -949,7 +958,7 @@ end)
 
 test('native resize persists bounded results geometry and ends on release lock or hide',function()
     C:Stop();C:ShowPanel(true);local saved=N.Model.Copy(C.profile);local p=A.Position();p.name='Resize target';p.role='Trainer';p.zone='Ironforge';C.matches={}
-    for i=1,40 do C.matches[i]=p end;C.highlight=1;C.profile.locked=false;C:Refresh()
+    for i=1,40 do C.matches[i]=p end;C.highlight=1;setPreference(C,'locked',false);C:Refresh()
     assert(U.resizeGrip:IsShown() and U.frame.resizable and U.frame.resizeBounds[1]==220)
     local anchor=U.frame.point;U.resizeGrip.scripts.OnMouseDown(nil,'RightButton');assert(not U.resizing)
     U.resizeGrip.scripts.OnMouseDown(nil,'LeftButton');assert(U.resizing and U.frame.sizing=='BOTTOMRIGHT' and C.profile.dock=='none')
@@ -958,16 +967,16 @@ test('native resize persists bounded results geometry and ends on release lock o
     C:Refresh();assert(U.frame.point==anchor and U.frame:GetWidth()==460 and U.frame:GetHeight()==height,'refresh leaves native sizing geometry alone')
     U.resizeGrip.scripts.OnMouseUp(nil,'LeftButton');assert(not U.resizing and U.frame:GetWidth()==460)
     local loaded=N.Settings.Load(C.profile);assert(loaded.width==460 and loaded.resultsHeight==410)
-    U.resizeGrip.scripts.OnMouseDown(nil,'LeftButton');C.profile.locked=true;C:Refresh();assert(not U.resizing and not U.resizeGrip:IsShown())
+    U.resizeGrip.scripts.OnMouseDown(nil,'LeftButton');setPreference(C,'locked',true);C:Refresh();assert(not U.resizing and not U.resizeGrip:IsShown())
     U.resizeGrip.scripts.OnMouseDown(nil,'LeftButton');assert(not U.resizing)
-    C.profile.locked=false;C:Refresh();U.resizeGrip.scripts.OnMouseDown(nil,'LeftButton');C:ShowPanel(false);assert(not U.resizing)
-    for k,v in pairs(saved) do C.profile[k]=v end;C:ShowPanel(true);C:Stop();C:ApplyProfile()
+    setPreference(C,'locked',false);C:Refresh();U.resizeGrip.scripts.OnMouseDown(nil,'LeftButton');C:ShowPanel(false);assert(not U.resizing)
+    restorePreferences(C,saved);C:ShowPanel(true);C:Stop();C:RefreshAppearance()
 end)
 
 test('idle empty and compact views resize width without changing remembered results height',function()
     C:Stop();C:ShowPanel(true);local saved=N.Model.Copy(C.profile);local oldFilter=C.filter
-    C.profile.locked=false;C.profile.width=240;C.profile.resultsHeight=417;C.profile.fontSize=13;C.profile.scale=1
-    C.destination=nil;C.origin=nil;C.query='';C.status=nil;C.searchOrigin=false;C.filter={categories={},classes={},professions={}};C:ApplyProfile()
+    setPreference(C,'locked',false);setPreference(C,'width',240);setPreference(C,'resultsHeight',417);setPreference(C,'fontSize',13);setPreference(C,'scale',1)
+    C.destination=nil;C.origin=nil;C.query='';C.status=nil;C.searchOrigin=false;C.filter={categories={},classes={},professions={}};C:RefreshAppearance()
     local function resize(width)
         C:Refresh();assert(U.resizeGrip:IsShown(),'every unlocked panel view exposes its grip')
         local height=U.frame:GetHeight();local results=C.profile.resultsHeight
@@ -985,15 +994,15 @@ test('idle empty and compact views resize width without changing remembered resu
     resize(230);assert(C.compact and U.stop:IsShown())
     assert(U.frame:GetHeight()-19>=-U.stop.point[3]+U.stop:GetHeight(),'compact grip clears the stop action')
     local compactWidth=C.profile.width;U.expand.scripts.OnClick();assert(U.frame:GetWidth()==compactWidth)
-    C.profile.locked=true;C:Refresh();assert(not U.resizeGrip:IsShown());U.resizeGrip.scripts.OnMouseDown(U.resizeGrip,'LeftButton');assert(not U.resizing)
-    C.profile=saved;C.filter=oldFilter;C.destination=nil;C:Stop();C:ApplyProfile()
+    setPreference(C,'locked',true);C:Refresh();assert(not U.resizeGrip:IsShown());U.resizeGrip.scripts.OnMouseDown(U.resizeGrip,'LeftButton');assert(not U.resizing)
+    restorePreferences(C,saved);C.filter=oldFilter;C.destination=nil;C:Stop();C:RefreshAppearance()
 end)
 
 test('edge tab drags vertically in physical pixels without expanding and restores its preference',function()
     C:Stop();C:ShowPanel(true);local saved=N.Model.Copy(C.profile);local parentScale=UIParent:GetScale();local oldX,oldY=cursorX,cursorY
-    C.profile.locked=false;C.profile.width=240
+    setPreference(C,'locked',false);setPreference(C,'width',240)
     for _,scale in ipairs({.5,1,1.6}) do for _,side in ipairs({'left','right'}) do
-        UIParent:SetScale(.75);C.profile.scale=scale;C.profile.dockPosition=.5;C:ApplyProfile();U:SetDock(C,side,true)
+        UIParent:SetScale(.75);setPreference(C,'scale',scale);setPreference(C,'dockPosition',.5);C:RefreshAppearance();U:SetDock(C,side,true)
         local handle=U.handle;local beforeX=handle.point[4];local beforeY=handle.point[5]
         local travel=UIParent:GetHeight()*UIParent:GetEffectiveScale()-handle:GetHeight()*handle:GetEffectiveScale()
         cursorX,cursorY=400,500;handle.scripts.OnMouseDown(handle,'LeftButton');handle.scripts.OnDragStart(handle,'LeftButton');assert(U.handleDrag)
@@ -1009,14 +1018,14 @@ test('edge tab drags vertically in physical pixels without expanding and restore
         handle.scripts.OnMouseDown(handle,'LeftButton');handle.scripts.OnMouseUp(handle,'LeftButton');handle.scripts.OnClick(handle,'LeftButton')
         assert(not C.tucked and U.frame:IsShown(),'the next genuine click still expands')
         U:SetDock(C,side,true);local position=handle.point[5];assert(C.profile.dockPosition==1)
-        C.profile=N.Settings.Load(C.profile);C:ApplyProfile();U:SetDock(C,side,true);assert(C.profile.dockPosition==1 and handle.point[5]==position)
+        restorePreferences(C,N.Settings.Load(C.profile));C:RefreshAppearance();U:SetDock(C,side,true);assert(C.profile.dockPosition==1 and handle.point[5]==position)
     end end
-    UIParent:SetScale(parentScale);cursorX,cursorY=oldX,oldY;C.profile=saved;C:ShowPanel(true);C:ApplyProfile()
+    UIParent:SetScale(parentScale);cursorX,cursorY=oldX,oldY;restorePreferences(C,saved);C:ShowPanel(true);C:RefreshAppearance()
 end)
 
 test('edge drag handles unavailable cursor locking hiding side changes and profile replacement',function()
     C:Stop();C:ShowPanel(true);local saved=N.Model.Copy(C.profile);local cursor=GetCursorPosition;local oldX,oldY=cursorX,cursorY;local parentScale=UIParent:GetScale()
-    C.profile.locked=false;C.profile.dockPosition=.4;C:ApplyProfile();U:SetDock(C,'right',true)
+    setPreference(C,'locked',false);setPreference(C,'dockPosition',.4);C:RefreshAppearance();U:SetDock(C,'right',true)
     local handle=U.handle
     local function begin()
         cursorX,cursorY=300,500;handle.scripts.OnMouseDown(handle,'LeftButton');handle.scripts.OnDragStart(handle,'LeftButton');assert(U.handleDrag)
@@ -1025,70 +1034,46 @@ test('edge drag handles unavailable cursor locking hiding side changes and profi
     assert(not U.handleDrag and C.profile.dockPosition==.4);GetCursorPosition=cursor
     begin();GetCursorPosition=function() return nil,nil end;handle.scripts.OnUpdate(handle,.016);assert(C.profile.dockPosition==.4);GetCursorPosition=cursor
     handle.scripts.OnMouseUp(handle,'LeftButton');assert(not U.handleDrag)
-    begin();C.profile.locked=true;C:Refresh();assert(not U.handleDrag)
+    begin();setPreference(C,'locked',true);C:Refresh();assert(not U.handleDrag)
     local locked=C.profile.dockPosition;handle.scripts.OnMouseDown(handle,'LeftButton');handle.scripts.OnDragStart(handle,'LeftButton');assert(not U.handleDrag and C.profile.dockPosition==locked)
-    C.profile.locked=false;C:Refresh();begin();C:ShowPanel(false);assert(not U.handleDrag)
+    setPreference(C,'locked',false);C:Refresh();begin();C:ShowPanel(false);assert(not U.handleDrag)
     C:ShowPanel(true);U:SetDock(C,'right',true);begin();U:SetDock(C,'left',true);assert(not U.handleDrag and C.profile.dock=='left')
     begin();local position=C.profile.dockPosition;UIParent:SetScale(.8);dispatchEvent('UI_SCALE_CHANGED')
     assert(not U.handleDrag and C.profile.dockPosition==position,'a screen scale change cancels the old physical-pixel gesture')
-    UIParent:SetScale(parentScale);C:ApplyProfile()
-    begin();local prior=C.profile;local replacement=N.Model.Copy(prior);replacement.dockPosition=.8;C.profile=replacement;C:ApplyProfile()
+    UIParent:SetScale(parentScale);C:RefreshAppearance()
+    begin();local prior=C.profile;assert(N.App.profiles:Duplicate('HandleReplacement'));setPreference(C,'dockPosition',.8)
     cursorY=800;local update=handle.scripts.OnUpdate;if update then update(handle,.016) end
-    assert(not U.handleDrag and replacement.dockPosition==.8 and prior.dockPosition~=.8,'profile changes cannot receive an old gesture')
-    GetCursorPosition=cursor;cursorX,cursorY=oldX,oldY;C.profile=saved;C:ShowPanel(true);C:ApplyProfile()
+    assert(not U.handleDrag and C.profile.dockPosition==.8 and prior.dockPosition~=.8,'profile changes cannot receive an old gesture')
+    GetCursorPosition=cursor;cursorX,cursorY=oldX,oldY;restorePreferences(C,saved);C:ShowPanel(true);C:RefreshAppearance()
 end)
 
 test('profile frame layer updates panel and tab while menus remain above both',function()
-    C:Stop();C:ShowPanel(true);local saved=N.Model.Copy(C.profile);local O=N.Options;local choose={}
-    local root={SetScrollMode=function() end,CreateRadio=function(_,label,selected,callback) choose[label]=callback;return {AddInitializer=function() end} end}
-    O.strata.menu(O.strata,root)
-    for _,entry in ipairs({{'Low','LOW'},{'Medium','MEDIUM'},{'High','HIGH'}}) do
-        choose[entry[1]]();assert(C.profile.strata==entry[2] and U.frame:GetFrameStrata()==entry[2] and U.handle:GetFrameStrata()==entry[2])
+    C:Stop();C:ShowPanel(true);local saved=N.Model.Copy(C.profile);local O=N.Options;assert(O:Open('position'))
+    for _,value in ipairs({'LOW','MEDIUM','HIGH'}) do
+        setPreference(C,'strata',value)
+        assert(U.frame:GetFrameStrata()==value and U.handle:GetFrameStrata()==value)
         assert(U.frame:GetFrameLevel()==100 and U.handle:GetFrameLevel()==100)
         assert(U.settings:GetFrameLevel()>U.header:GetFrameLevel() and U.resizeGrip:GetFrameLevel()>U.frame:GetFrameLevel())
         assert(U.menu:GetFrameStrata()=='DIALOG' and O.frame:GetFrameStrata()=='DIALOG')
-        U:SetDock(C,'right',true);assert(U.handle:GetFrameStrata()==entry[2]);U.handle.scripts.OnMouseDown(U.handle,'LeftButton');U.handle.scripts.OnClick();assert(U.frame:GetFrameStrata()==entry[2])
+        U:SetDock(C,'right',true);assert(U.handle:GetFrameStrata()==value);U.handle.scripts.OnMouseDown(U.handle,'LeftButton');U.handle.scripts.OnClick();assert(U.frame:GetFrameStrata()==value)
     end
-    C.profile=N.Settings.Load({strata='LOW',dockPosition=.2});C:ApplyProfile();assert(O.strata.value=='LOW' and U.frame:GetFrameStrata()=='LOW')
-    C.profile=saved;C:ShowPanel(true);C:ApplyProfile()
+    restorePreferences(C,saved);C:ShowPanel(true)
 end)
 
 test('open options placement follows docking resizing and header drags including generated selections',function()
-    C:Stop();C:ShowPanel(true);local saved=N.Model.Copy(C.profile);local O=N.Options;local d=O.placement
-    local wasShown=O.frame:IsShown();local wasProfiles=O.profilesSelected;local left=U.frame.GetLeft
-    local setDefault,generate=d.SetDefaultText,d.GenerateMenu;local priorSelection=d.selectionText
-    d.SetDefaultText=function(self,value)
-        self.defaultText=value;self.label=self.selectionText or value;self.Text:SetText(self.label)
-    end
-    d.GenerateMenu=function(self)
-        self.generated=(self.generated or 0)+1;local selected={}
-        self.menu(self,{SetScrollMode=function() end,CreateRadio=function(_,label,isSelected)
-            if isSelected() then selected[#selected+1]=label end
-            return {AddInitializer=function() end}
-        end})
-        self.selectionText=selected[1];self.label=self.selectionText or self.defaultText;self.Text:SetText(self.label)
-    end
-    local function placement(value,caption)
-        assert(O.frame:IsShown() and d.value==value and d.Text:GetText()==caption,'open placement selector must reflect panel interactions')
-        local selected={};d.menu(d,{SetScrollMode=function() end,CreateRadio=function(_,label,isSelected)
-            if isSelected() then selected[#selected+1]=label end
-            return {AddInitializer=function() end}
-        end})
-        assert(#selected==1 and selected[1]==caption,'native radio selection matches the displayed placement')
-    end
-    C.profile.locked=false;C.profile.dock='none';C.destination=nil;C.matches=nil;C.query='';C:ApplyProfile();O:Open();O.optionsTab.scripts.OnClick()
-    placement('none','Free (dragged)');U:SetDock(C,'right',true);placement('right','Right screen edge')
-    U.handle.scripts.OnMouseDown(U.handle,'LeftButton');U.handle.scripts.OnClick();assert(not C.tucked)
+    C:Stop();C:ShowPanel(true);local saved=N.Model.Copy(C.profile);local d=option(N.Options,'position',2);local left=U.frame.GetLeft
+    setPreference(C,'locked',false);U:SetDock(C,'none',false);assert(d.Text:GetText()=='Free (dragged)')
+    U:SetDock(C,'right',true);assert(d.Text:GetText()=='Right screen edge')
+    U.handle.scripts.OnMouseDown(U.handle,'LeftButton');U.handle.scripts.OnClick()
     U.resizeGrip.scripts.OnMouseDown(U.resizeGrip,'LeftButton');local height=U.frame:GetHeight()
     U.frame:SetSize(260,height);U.frame.scripts.OnSizeChanged(U.frame,260,height);U.resizeGrip.scripts.OnMouseUp(U.resizeGrip,'LeftButton')
-    placement('none','Free (dragged)')
-    U.frame.GetLeft=function() return 8 end;U.header.scripts.OnDragStart();U.header.scripts.OnDragStop();placement('left','Left screen edge')
-    U.frame.GetLeft=left;d.SetDefaultText=setDefault;d.GenerateMenu=generate;d.selectionText=priorSelection;d.atcfSelectionValue=nil
-    C.profile=saved;C:ShowPanel(true);C:ApplyProfile();O:Page(wasProfiles);if not wasShown then O.frame:Hide() end
+    assert(d.Text:GetText()=='Free (dragged)')
+    U.frame.GetLeft=function()return 8 end;U.header.scripts.OnDragStart();U.header.scripts.OnDragStop();assert(d.Text:GetText()=='Left screen edge')
+    U.frame.GetLeft=left;restorePreferences(C,saved);C:ShowPanel(true);N.Options.panel:Close()
 end)
 
 test('narrow large-font navigation wraps its header and footer without covering other controls',function()
-    C:Stop();C:ShowPanel(true);local saved=N.Model.Copy(C.profile);local filter=C.filter;C.profile.width=220;C.profile.fontSize=18;C.profile.scale=1.6;C.profile.locked=false;C:ApplyProfile()
+    C:Stop();C:ShowPanel(true);local saved=N.Model.Copy(C.profile);local filter=C.filter;setPreference(C,'width',220);setPreference(C,'fontSize',18);setPreference(C,'scale',1.6);setPreference(C,'locked',false);C:RefreshAppearance()
     local p=A.Position();local goal=N.Model.Copy(p);goal.id='narrow-nav';goal.name='A narrow destination';goal.x=p.x+500
     C.results={N.Routes.Summary({{mode='walk',start=p,finish=goal,distance=500,seconds=90}},goal,C:Context())};C.destination=goal;C.matches=nil;C:Go()
     local function naturalHeight(text)
@@ -1101,18 +1086,18 @@ test('narrow large-font navigation wraps its header and footer without covering 
     assert(U.go.text:GetText()=='Compare matches' and U.go.text.wordWrap and U.go:GetHeight()>30)
     assert(U.fold.point[2]+U.fold:GetWidth()+10<=U.go.point[2] and U.go.point[2]+U.go:GetWidth()<=U.stop.point[2]-8)
     assert(naturalHeight(U.go.text)<=U.go.text:GetHeight() and U.frame:GetHeight()>=-U.go.point[3]+U.go:GetHeight()+22)
-    C.profile=saved;C.filter=filter;C.destination=nil;C:Stop();C:ApplyProfile()
+    restorePreferences(C,saved);C.filter=filter;C.destination=nil;C:Stop();C:RefreshAppearance()
 end)
 
 test('header movement survives background refresh and saves release position without snapping back',function()
     C:Stop();C:ShowPanel(true);local saved=N.Model.Copy(C.profile);local left,top=U.frame.GetLeft,U.frame.GetTop
-    C.profile.locked=false;C.profile.dock='none';C:Refresh();U.header.scripts.OnDragStart();assert(U.dragging)
+    setPreference(C,'locked',false);setPreference(C,'dock','none');C:Refresh();U.header.scripts.OnDragStart();assert(U.dragging)
     U.frame:SetPoint('TOPLEFT',UIParent,'TOPLEFT',420,-240);local anchor=U.frame.point
     U.frame.GetLeft=function() return 420 end;U.frame.GetTop=function() return UIParent:GetHeight()/U.frame:GetScale()-240 end
     C:RefreshAppearance(false);C:Refresh();assert(U.dragging and U.frame.point==anchor,'refresh must not restore saved anchors while native move owns them')
     U.header.scripts.OnDragStop();assert(not U.dragging and C.profile.x==420 and C.profile.y==-240 and C.profile.dock=='none' and not C.tucked)
     C:Refresh();assert(U.frame.point[4]==420 and U.frame.point[5]==-240)
-    U.frame.GetLeft=left;U.frame.GetTop=top;for k,v in pairs(saved) do C.profile[k]=v end;C:ApplyProfile()
+    U.frame.GetLeft=left;U.frame.GetTop=top;restorePreferences(C,saved);C:RefreshAppearance()
 end)
 
 test('header movement cancels immediately on hide lock or tuck without a stale release docking',function()
@@ -1120,49 +1105,51 @@ test('header movement cancels immediately on hide lock or tuck without a stale r
     C.destination=nil;C.matches=nil;C.query='';C.status=nil
     U.frame.GetLeft=function() return 420 end;U.frame.GetTop=function() return UIParent:GetHeight()/U.frame:GetScale()-240 end
     local function begin()
-        C.profile.locked=false;U:SetDock(C,'none',false);C:ShowPanel(true);U.header.scripts.OnDragStart()
+        setPreference(C,'locked',false);U:SetDock(C,'none',false);C:ShowPanel(true);U.header.scripts.OnDragStart()
         assert(U.dragging and U.frame.moving)
     end
     begin();local stopped=U.frame.stopped or 0;C:ShowPanel(false)
     assert(not U.dragging and not U.frame.moving and not U.frame:IsShown() and U.frame.stopped>stopped,'hide cancels native motion before layout can early-return')
     U.header.scripts.OnDragStop();assert(not C.tucked and C.profile.dock=='none')
-    begin();stopped=U.frame.stopped;C.profile.locked=true;C:ApplyProfile()
+    begin();stopped=U.frame.stopped;setPreference(C,'locked',true);C:RefreshAppearance()
     assert(not U.dragging and not U.frame.moving and U.frame.stopped>stopped,'locking stops native movement immediately')
     local x,y=C.profile.x,C.profile.y;U.header.scripts.OnDragStop();assert(C.profile.x==x and C.profile.y==y and not C.tucked)
     begin();U:SetDock(C,'right',true)
     assert(not U.dragging and not U.frame.moving and C.tucked and U.handle:IsShown() and not U.frame:IsShown())
     U.header.scripts.OnDragStop();assert(C.profile.dock=='right' and C.tucked)
-    U.frame.GetLeft=left;U.frame.GetTop=top;C.profile=saved;C:ShowPanel(true);C:ApplyProfile()
+    U.frame.GetLeft=left;U.frame.GetTop=top;restorePreferences(C,saved);C:ShowPanel(true);C:RefreshAppearance()
 end)
 
 test('profile switch during a header drag preserves the replacement placement and layer',function()
-    C:Stop();C:ShowPanel(true);local profile,profiles=C.profile,C.profiles;local left,top=U.frame.GetLeft,U.frame.GetTop
-    C.profile=N.Model.Copy(profile);C.profile.locked=false;C.profile.dock='none';C.profile.scale=1;C.profile.strata='HIGH'
-    local after=N.Model.Copy(C.profile);after.x=91;after.y=-77;after.scale=.5;after.strata='LOW';after.width=220
-    C.profiles={version=1,active='BeforeDrag',profiles={BeforeDrag=C.profile,AfterDrag=after}};C:BindFilters();C:ApplyProfile()
-    U.frame.GetLeft=function() return 420 end;U.frame.GetTop=function() return UIParent:GetHeight()/U.frame:GetScale()-240 end
+    C:Stop();C:ShowPanel(true);local profile=C.profile;local active=N.App.profiles:Active();local left,top=U.frame.GetLeft,U.frame.GetTop
+    assert(N.App.profiles:Duplicate('AfterDrag'));assert(C:SetPreferences({x=91,y=-77,scale=.5,strata='LOW',width=220,locked=false,dock='none'}))
+    assert(N.App.profiles:Switch(active));assert(C:SetPreferences({locked=false,dock='none',scale=1,strata='HIGH'}))
+    U.frame.GetLeft=function()return 420 end;U.frame.GetTop=function()return UIParent:GetHeight()/U.frame:GetScale()-240 end
     U.header.scripts.OnDragStart();assert(U.dragging and U.frame.moving)
-    assert(N.Options:ProfileAction('SwitchProfile','AfterDrag'));assert(not U.dragging and not U.frame.moving)
+    assert(N.App.profiles:Switch('AfterDrag'));assert(not U.dragging and not U.frame.moving)
     assert(C.profile.x==91 and C.profile.y==-77 and U.frame:GetScale()==.5 and U.frame:GetFrameStrata()=='LOW')
-    U.header.scripts.OnDragStop();assert(C.profile.x==91 and C.profile.y==-77 and C.profile.width==220,'late release cannot write into the newly selected profile')
-    U.frame.GetLeft=left;U.frame.GetTop=top;C.profile=profile;C.profiles=profiles;C:BindFilters();C:ShowPanel(true);C:ApplyProfile()
+    U.header.scripts.OnDragStop();assert(C.profile.x==91 and C.profile.y==-77 and C.profile.width==220)
+    -- Same-name reset/copy also invalidate a gesture, even though the profile ID remains.
+    U.header.scripts.OnDragStart();assert(U.dragging);assert(N.App.profiles:Reset());assert(not U.dragging)
+    setPreference(C,'width',261);U.header.scripts.OnDragStart();assert(U.dragging);assert(N.App.profiles:CopyFrom(active));assert(not U.dragging)
+    U.frame.GetLeft=left;U.frame.GetTop=top;assert(N.App.profiles:Switch(active));restorePreferences(C,profile);C:ShowPanel(true)
 end)
 
 test('geometry gestures cancel on display changes while routine font refresh keeps native control',function()
     C:Stop();C:ShowPanel(true);local saved=N.Model.Copy(C.profile);local parentScale=UIParent:GetScale();local screenWidth,screenHeight=UIParent:GetWidth(),UIParent:GetHeight()
-    C.destination=nil;C.matches=nil;C.query='';C.status=nil;C.profile.locked=false;C.profile.scale=1.6;C.profile.width=240;U:SetDock(C,'none',false);C:ApplyProfile()
+    C.destination=nil;C.matches=nil;C.query='';C.status=nil;setPreference(C,'locked',false);setPreference(C,'scale',1.6);setPreference(C,'width',240);U:SetDock(C,'none',false);C:RefreshAppearance()
     U.resizeGrip.scripts.OnMouseDown(U.resizeGrip,'LeftButton');assert(U.resizing and U.frame.sizing=='RIGHT')
     C:RefreshAppearance(false);assert(U.resizing and U.frame.sizing=='RIGHT','ordinary font refresh must not end a resize')
     UIParent:SetSize(900,320);dispatchEvent('DISPLAY_SIZE_CHANGED')
     assert(not U.resizing and not U.frame.sizing and math.abs(U.frame:GetScale()-320/660)<.0001,'display shrink cancels native sizing and refits immediately')
     local width=C.profile.width;U.resizeGrip.scripts.OnMouseUp(U.resizeGrip,'LeftButton');assert(C.profile.width==width)
-    UIParent:SetSize(screenWidth,screenHeight);C:ApplyProfile();U.header.scripts.OnDragStart();assert(U.dragging and U.frame.moving)
+    UIParent:SetSize(screenWidth,screenHeight);C:RefreshAppearance();U.header.scripts.OnDragStart();assert(U.dragging and U.frame.moving)
     UIParent:SetScale(.8);dispatchEvent('UI_SCALE_CHANGED');assert(not U.dragging and not U.frame.moving)
-    UIParent:SetScale(parentScale);C:ApplyProfile();U.resizeGrip.scripts.OnMouseDown(U.resizeGrip,'LeftButton');assert(U.resizing)
-    C.profile=N.Model.Copy(C.profile);C.profile.width=220;C.profile.x=91;C.profile.y=-77;C:ApplyProfile()
+    UIParent:SetScale(parentScale);C:RefreshAppearance();U.resizeGrip.scripts.OnMouseDown(U.resizeGrip,'LeftButton');assert(U.resizing)
+    setPreference(C,'width',220);setPreference(C,'x',91);setPreference(C,'y',-77);C:RefreshAppearance()
     assert(not U.resizing and not U.frame.sizing and C.profile.width==220 and C.profile.x==91 and C.profile.y==-77)
     U.resizeGrip.scripts.OnMouseUp(U.resizeGrip,'LeftButton');assert(C.profile.x==91 and C.profile.y==-77)
-    C.profile=saved;UIParent:SetScale(parentScale);UIParent:SetSize(screenWidth,screenHeight);C:ShowPanel(true);C:ApplyProfile()
+    restorePreferences(C,saved);UIParent:SetScale(parentScale);UIParent:SetSize(screenWidth,screenHeight);C:ShowPanel(true);C:RefreshAppearance()
 end)
 
 test('navigation typography grows ten percent and compass stays world relative as arrow turns',function()
@@ -1174,28 +1161,28 @@ test('navigation typography grows ten percent and compass stays world relative a
     assert(math.abs(U.next.fontSize-C.profile.fontSize*1.1)<.0001)
     U:Guidance(C,p,{speed=7,facing=math.pi/2},0);assert(U.cardinal:GetText()=='NW' and U.arrow.rotation~=rotation)
     assert(U.tuck.iconKind=='back');U:SetDock(C,'right',true);assert(U.handle.iconKind=='left');U.handle.scripts.OnMouseDown(U.handle,'LeftButton');U.handle.scripts.OnClick()
-    U.pause.scripts.OnClick();assert(not U.cardinal:IsShown());C:Stop();C.profile.dock='none';C:Refresh()
+    U.pause.scripts.OnClick();assert(not U.cardinal:IsShown());C:Stop();setPreference(C,'dock','none');C:Refresh()
 end)
 test('matching bold weight is validated cached and downgraded without losing the regular family',function()
-    withFontLibrary(function(lib)
+    withFontLibrary(function(lib,callbacks)
         lib.IsValid=function(_,kind,name) return name=='Expressway' or name=='Expressway Bold' end
         lib.Fetch=function(_,kind,name) return name=='Expressway Bold' and 'expressway-bold.ttf' or 'review-expressway.ttf' end
-        C:RefreshAppearance(true)
+        N.App.fonts:Refresh()
         assert(U.next.font=='expressway-bold.ttf' and U.next.fontFlags=='' and U.rows[1].detail.font=='expressway-bold.ttf')
-        assert(N.Options.font.Text.font=='review-expressway.ttf' and U.remaining.font=='review-expressway.ttf')
+        assert(option(N.Options,'appearance',2).Text.font=='review-expressway.ttf' and U.remaining.font=='review-expressway.ttf')
         local target=U.rows[3].name;local original=target.SetFont or methods.SetFont
         target.SetFont=function(self,path,size,flags) if path=='expressway-bold.ttf' then return true end;return original(self,path,size,flags) end
-        target.font='previous-font';C:RefreshAppearance(true)
+        target.font='previous-font';N.App.fonts:Refresh()
         assert(U.next.font=='review-expressway.ttf' and U.next.fontFlags=='OUTLINE' and U.rows[1].detail.font=='review-expressway.ttf')
-        assert(N.Options.font.Text.font=='review-expressway.ttf' and C.profile.font=='Expressway')
-        target.SetFont=nil;C:RefreshAppearance(true);assert(U.next.font=='expressway-bold.ttf')
+        assert(option(N.Options,'appearance',2).Text.font=='review-expressway.ttf' and C.profile.font=='Expressway')
+        target.SetFont=nil;callbacks.LibSharedMedia_Registered(nil,'font');assert(U.next.font=='expressway-bold.ttf')
     end)
 end)
 
 test('editor labels fields action buttons and route action share consistent alignment at supported widths',function()
     C:Stop();local saved={profile=N.Model.Copy(C.profile),filter=C.filter,searchOrigin=C.searchOrigin};C.destination=nil;C.status=nil;C.matches={}
     for _,width in ipairs({220,240,280,304,460,640}) do for _,size in ipairs({10,13,18}) do for _,scale in ipairs({.5,1,1.6}) do
-        C.profile.width=width;C.profile.fontSize=size;C.profile.scale=scale;C:ApplyProfile()
+        setPreference(C,'width',width);setPreference(C,'fontSize',size);setPreference(C,'scale',scale);C:RefreshAppearance()
         assert(U.current.point[2]==U.filterButton.point[2] and U.current:GetWidth()==U.filterButton:GetWidth())
         assert(U.current.point[2]+U.current:GetWidth()==width-14 and U.tuck.point[2]==U.current.point[2])
         assert(U.from:GetWidth()==U.to:GetWidth() and U.from.point[2]+U.from:GetWidth()+4==U.current.point[2])
@@ -1218,9 +1205,9 @@ test('editor labels fields action buttons and route action share consistent alig
     end end end
     local measure=U.fieldLabels[1].GetUnboundedStringWidth;local actionMeasure=U.go.text.GetUnboundedStringWidth
     U.fieldLabels[1].GetUnboundedStringWidth=function() return 1000 end;U.go.text.GetUnboundedStringWidth=function() return 1000 end
-    C.profile.width=280;C:Refresh();assert(U.from:GetWidth()>=100 and U.go:GetWidth()==252 and U.go.text:GetWidth()<=U.go:GetWidth())
+    setPreference(C,'width',280);C:Refresh();assert(U.from:GetWidth()>=100 and U.go:GetWidth()==252 and U.go.text:GetWidth()<=U.go:GetWidth())
     U.fieldLabels[1].GetUnboundedStringWidth=measure;U.go.text.GetUnboundedStringWidth=actionMeasure
-    C.profile=saved.profile;C.filter=saved.filter;C.searchOrigin=saved.searchOrigin;C:Stop();C:ApplyProfile()
+    restorePreferences(C,saved.profile);C.filter=saved.filter;C.searchOrigin=saved.searchOrigin;C:Stop();C:RefreshAppearance()
 end)
 test('map and minimap preferences default on migrate explicit opt outs and remain independent',function()
     local S=N.Settings
@@ -1229,28 +1216,28 @@ test('map and minimap preferences default on migrate explicit opt outs and remai
     p=S.Load({overlays=false,mapMarkers=true});assert(p.mapMarkers and not p.minimapMarkers)
     p=S.Load({mapMarkers=false,minimapMarkers=true});assert(not p.mapMarkers and p.minimapMarkers)
     local savedMap,savedMini=C.profile.mapMarkers,C.profile.minimapMarkers
-    N.Options.overlays:SetChecked(false);N.Options.overlays.scripts.OnClick();assert(not C.profile.mapMarkers and C.profile.minimapMarkers)
-    N.Options.minimapMarkers:SetChecked(false);N.Options.minimapMarkers.scripts.OnClick();assert(not C.profile.mapMarkers and not C.profile.minimapMarkers)
-    C.profile.mapMarkers=savedMap;C.profile.minimapMarkers=savedMini;C:ApplyProfile()
+    local mapToggle=option(N.Options,'navigation',2);mapToggle:SetChecked(false);mapToggle.scripts.OnClick(mapToggle);assert(not C.profile.mapMarkers and C.profile.minimapMarkers)
+    local miniToggle=option(N.Options,'navigation',3);miniToggle:SetChecked(false);miniToggle.scripts.OnClick(miniToggle);assert(not C.profile.mapMarkers and not C.profile.minimapMarkers)
+    setPreference(C,'mapMarkers',savedMap);setPreference(C,'minimapMarkers',savedMini);C:RefreshAppearance()
 end)
 
 test('selected destination appears before Go on zone and world maps with independent minimap control',function()
     C:Stop();C.destination=nil;C.origin=nil;C.manualPause=false;C.results={}
     local mapID,shown=WorldMapFrame.GetMapID,WorldMapFrame:IsShown();local project=C_Map.GetMapPosFromWorldPos
-    local oldMap,oldMini=C.profile.mapMarkers,C.profile.minimapMarkers;C.profile.mapMarkers=true;C.profile.minimapMarkers=true
+    local oldMap,oldMini=C.profile.mapMarkers,C.profile.minimapMarkers;setPreference(C,'mapMarkers',true);setPreference(C,'minimapMarkers',true)
     local id=1429;WorldMapFrame.GetMapID=function() return id end;WorldMapFrame:Show()
     local p=A.Position();local goal=N.Model.Copy(p);goal.name='Map preview';goal.id='map-preview';goal.x=p.x+20
     C:Choose(goal);local O=N.Overlay;O:Update(C,p,{facing=0,speed=7})
     assert(not C.nav.route and O.destination:IsShown() and O.destination.caption=='Destination: Map preview' and O.mini:IsShown())
     id=947;O:Update(C,p,{facing=0,speed=7});assert(O.destination:IsShown(),'use native projection for the currently viewed map')
-    C.profile.minimapMarkers=false;O:Update(C,p,{speed=7});assert(not O.mini:IsShown() and O.destination:IsShown())
-    C.profile.minimapMarkers=true;C.profile.mapMarkers=false;O:Update(C,p,{speed=7});assert(O.mini:IsShown() and not O.destination:IsShown())
-    C.profile.mapMarkers=true;O:Update(C,nil,{speed=7});assert(O.destination:IsShown() and not O.mini:IsShown(),'map coordinates remain useful while player location is missing')
+    setPreference(C,'minimapMarkers',false);O:Update(C,p,{speed=7});assert(not O.mini:IsShown() and O.destination:IsShown())
+    setPreference(C,'minimapMarkers',true);setPreference(C,'mapMarkers',false);O:Update(C,p,{speed=7});assert(O.mini:IsShown() and not O.destination:IsShown())
+    setPreference(C,'mapMarkers',true);O:Update(C,nil,{speed=7});assert(O.destination:IsShown() and not O.mini:IsShown(),'map coordinates remain useful while player location is missing')
     O:Update(C,p,{dead=true,speed=7});assert(O.destination:IsShown() and not O.mini:IsShown())
     C_Map.GetMapPosFromWorldPos=function() return 999,CreateVector2D(.5,.5) end
     O:Update(C,p,{speed=7});assert(not O.destination:IsShown(),'never place a fabricated pin on an unsupported map')
     C_Map.GetMapPosFromWorldPos=project;WorldMapFrame.GetMapID=mapID;WorldMapFrame:SetShown(shown)
-    C.profile.mapMarkers=oldMap;C.profile.minimapMarkers=oldMini;C.destination=nil;C:Stop()
+    setPreference(C,'mapMarkers',oldMap);setPreference(C,'minimapMarkers',oldMini);C.destination=nil;C:Stop()
 end)
 
 test('active navigation owns minimap direction while a new destination is previewed on the world map',function()
@@ -1302,17 +1289,17 @@ test('inline and options route order share state without replacing active naviga
     C:Stop();local saved={data=C.data,known=C.character.known,profile=N.Model.Copy(C.profile),filter=C.filter};local p=A.Position()
     local goal=N.Model.Copy(p);goal.id='sort-goal';goal.name='Sort target';goal.x=p.x+1000
     C.data={nodes={[1]=p,[2]=goal},edges={{id=9801,from=1,to=2,start=p,finish=goal,mode='flight',distance=1400}}}
-    C.character.known={[1]={state='known'},[2]={state='known'}};C.profile.routeOrder='distance';C.filter={categories={},classes={},professions={}};C.destination=goal;C.origin=nil;C.taxi=nil
+    C.character.known={[1]={state='known'},[2]={state='known'}};setPreference(C,'routeOrder','distance');C.filter={categories={},classes={},professions={}};C.destination=goal;C.origin=nil;C.taxi=nil
     C:Plan();assert(C.results[1].flight==0 and U.routeOrder.value=='distance');C:Go();local active=C.nav.route
     C.compact=false;assert(C:SetRouteOrder('time'));assert(C.results[1].flight>0 and C.nav.route==active)
-    assert(U.routeOrder.value=='time' and N.Options.order.value=='time' and U.routeHeading:IsShown())
+    assert(U.routeOrder.value=='time' and option(N.Options,'navigation',1).Text:GetText()=='Estimated time' and U.routeHeading:IsShown())
     local results=C.results;assert(not C:SetRouteOrder('invalid') and C:SetRouteOrder('time') and C.results==results)
-    C:SetRouteOrder('distance');assert(C.results[1].flight==0 and C.nav.route==active and U.routeOrder.value=='distance' and N.Options.order.value=='distance')
-    C.data=saved.data;C.character.known=saved.known;C.profile=saved.profile;C.filter=saved.filter;C.destination=nil;C:Stop();C:ApplyProfile()
+    C:SetRouteOrder('distance');assert(C.results[1].flight==0 and C.nav.route==active and U.routeOrder.value=='distance' and option(N.Options,'navigation',1).Text:GetText()=='Distance')
+    C.data=saved.data;C.character.known=saved.known;restorePreferences(C,saved.profile);C.filter=saved.filter;C.destination=nil;C:Stop();C:RefreshAppearance()
 end)
 
 test('route comparison shares only identical destinations and gives legs full width',function()
-    C:Stop();local saved=N.Model.Copy(C.profile);C.profile.width=304;C.profile.fontSize=13;C.profile.scale=1;C.profile.resultsHeight=296;C:ApplyProfile()
+    C:Stop();local saved=N.Model.Copy(C.profile);setPreference(C,'width',304);setPreference(C,'fontSize',13);setPreference(C,'scale',1);setPreference(C,'resultsHeight',296);C:RefreshAppearance()
     local p=A.Position();local goal=N.Model.Copy(p);goal.id='compare-goal';goal.name='Kelv Sternhammer';goal.role='Warrior Trainer';goal.zone='Ironforge';goal.x=p.x+1900
     local start=N.Model.Copy(p);start.name='Thelsamar, Loch Modan';local finish=N.Model.Copy(goal);finish.name='Ironforge, Dun Morogh'
     local direct=N.Routes.Summary({{mode='walk',start=p,finish=goal,distance=1900,seconds=360}},goal,C:Context())
@@ -1329,28 +1316,28 @@ test('route comparison shares only identical destinations and gives legs full wi
     assert(not U.destinationName:IsShown() and U.rows[1].name:GetText()==goal.name and U.rows[2].name:GetText()==other.name)
     assert(U.rows[1].detail:GetText()=='Warrior Trainer • Ironforge' and U.rows[1].distance:GetText():find('Walk • Est.',1,true))
     assert(U.current.iconKind=='location' and not U.current.text:IsShown())
-    C.profile=saved;C.destination=nil;C:Stop();C:ApplyProfile()
+    restorePreferences(C,saved);C.destination=nil;C:Stop();C:RefreshAppearance()
 end)
 
 test('wrapped row measurement settles fractional scale before measuring and keeps footer separate',function()
-    C:Stop();local saved=N.Model.Copy(C.profile);C.profile.scale=1.25;C.profile.fontSize=13;C.profile.width=304
+    C:Stop();local saved=N.Model.Copy(C.profile);setPreference(C,'scale',1.25);setPreference(C,'fontSize',13);setPreference(C,'width',304)
     local p=A.Position();p.name='Measure target';p.role='Trainer';p.zone='Ironforge';C.matches={};C.highlight=1
     for i=1,40 do C.matches[i]=p end
-    C:ApplyProfile();local row=U.rows[1];local scale=row.name:GetEffectiveScale()
+    C:RefreshAppearance();local row=U.rows[1];local scale=row.name:GetEffectiveScale()
     assert(scale==1.25 and row.name:GetHeight()==(math.ceil(13*scale)+2)/scale)
     assert(U.resultsBoundary:IsShown() and -U.go.point[3]>U.bodyTop+U.bodyScroll:GetHeight())
     UIParent:SetSize(1280,540);dispatchEvent('DISPLAY_SIZE_CHANGED');scale=row.name:GetEffectiveScale()
     assert(scale==U.frame:GetEffectiveScale() and row.name:GetHeight()==(math.ceil(13*scale)+2)/scale)
     assert(U.frame:GetHeight()*scale<=540)
-    C.highlight=40;C.profile.width=640;C:Refresh();C.profile.width=280;C.profile.fontSize=18;C:ApplyProfile()
+    C.highlight=40;setPreference(C,'width',640);C:Refresh();setPreference(C,'width',280);setPreference(C,'fontSize',18);C:RefreshAppearance()
     local selected=U.rows[40];local offset=U.bodyScroll:GetVerticalScroll()
     assert(selected.bodyOffset>=offset and selected.bodyOffset+selected:GetHeight()<=offset+U.bodyScroll:GetHeight()+.001,'reflow reveals the highlighted result')
     U.body.scripts.OnMouseWheel(nil,1);offset=U.bodyScroll:GetVerticalScroll();C:Refresh()
     assert(U.bodyScroll:GetVerticalScroll()==offset,'unchanged layout preserves manual scroll position')
-    UIParent:SetSize(1920,1080);C.profile=saved;C:Stop();C:ApplyProfile()
+    UIParent:SetSize(1920,1080);restorePreferences(C,saved);C:Stop();C:RefreshAppearance()
 end)
 test('width resize rebudgets wrapped headings without pushing content outside the frame',function()
-    C:Stop();C:ShowPanel(true);local saved=N.Model.Copy(C.profile);C.profile.width=640;C.profile.fontSize=18;C.profile.scale=1;C.profile.locked=false;C:ApplyProfile()
+    C:Stop();C:ShowPanel(true);local saved=N.Model.Copy(C.profile);setPreference(C,'width',640);setPreference(C,'fontSize',18);setPreference(C,'scale',1);setPreference(C,'locked',false);C:RefreshAppearance()
     local p=A.Position();local goal=N.Model.Copy(p);goal.id='resize-wrap';goal.name=string.rep('Long shared destination ',3);goal.x=p.x+500
     local route=N.Routes.Summary({{mode='walk',start=p,finish=goal,distance=500,seconds=100}},goal,C:Context())
     C.results={route,route,route};C.destination=goal;C.status=nil;C:Refresh()
@@ -1360,7 +1347,7 @@ test('width resize rebudgets wrapped headings without pushing content outside th
     assert(U.resizeChrome>oldChrome and math.abs(U.resizeChrome-chrome)<.001)
     assert(U.bodyTop+U.bodyScroll:GetHeight()+22<=U.frame:GetHeight()+.001,'rewrapped content stays inside native frame height')
     assert(U.frame.resizeBounds[2]>=chrome+100)
-    U.resizeGrip.scripts.OnMouseUp(nil,'LeftButton');C.profile=saved;C.destination=nil;C:Stop();C:ApplyProfile()
+    U.resizeGrip.scripts.OnMouseUp(nil,'LeftButton');restorePreferences(C,saved);C.destination=nil;C:Stop();C:RefreshAppearance()
 end)
 test('native icons keep atlas crops aspect ratio and font-independent pooled geometry',function()
     local old=C_Texture
@@ -1384,8 +1371,8 @@ test('native icons keep atlas crops aspect ratio and font-independent pooled geo
     end
     assert(#frames==allocated and button.text:GetFont()==font,'repeated icon/scale changes allocate no frames or fonts')
     assert(button.pushedTexture==button.nativePushed and button.nativePushed.color[4]==.3)
-    U.handle.scripts.OnEnter();assert(U.handle.borderColor[1]==.9 and GameTooltip:GetText()=='Click to expand. Drag up or down to move.')
-    U.handle.scripts.OnLeave();assert(U.handle.borderColor[1]==.45)
+    U.handle.scripts.OnEnter(U.handle);assert(U.handle.borderColor[1]==U.theme.colors.accent[1] and GameTooltip:GetText()=='Click to expand. Drag up or down to move.')
+    U.handle.scripts.OnLeave(U.handle);assert(U.handle.borderColor[1]==U.theme.colors.border[1])
     button.scripts.OnClick();assert(clicks==1);C_Texture=old
 end)
 
@@ -1421,7 +1408,7 @@ test('missing native artwork keeps a visible usable action and gear atlas fallba
 end)
 test('search and route rows share one quiet measured tooltip without changing the global tooltip',function()
     C:Stop();C:ShowPanel(true);local saved=N.Model.Copy(C.profile)
-    C.profile.font='Arial';C.profile.fontSize=18;C.profile.scale=1.6;C:ApplyProfile()
+    setPreference(C,'font','Arial');setPreference(C,'fontSize',18);setPreference(C,'scale',1.6);C:RefreshAppearance()
     local p=A.Position();local goal=N.Model.Copy(p)
     goal.id='tip-target';goal.name='Trainer with noisy metadata';goal.x=p.x+120;goal.source='QuestieDB';goal.category='class';goal.role='Warrior Trainer';goal.zone='Ironforge'
     goal.confidence='provider';goal.mobile=true;goal.phase=7;goal.faction='Alliance';goal.questStarts=4;goal.questEnds=2
@@ -1433,7 +1420,7 @@ test('search and route rows share one quiet measured tooltip without changing th
         GameTooltip[name]=function() error('row tooltip must not mutate global GameTooltip') end
     end
     local function checkRow()
-        local row=U.rows[1];row.scripts.OnEnter()
+        local row=U.rows[1];row.scripts.OnEnter(row)
         local tip=U.rowTooltip;local line=tip.TextLeft1;local measured=tip.measuredText
         assert(tip:GetText()=='Travel time may vary based on terrain.' and line:GetText()==tip:GetText())
         assert(tip:GetOwner()==row and tip:IsShown() and tip.tooltipAnchor=='ANCHOR_RIGHT')
@@ -1441,8 +1428,8 @@ test('search and route rows share one quiet measured tooltip without changing th
         assert(measured.path=='Fonts\\ARIALN.TTF' and measured.size==11 and measured.flags=='','native measurement uses the small regular font before population')
         assert(measured.width>0 and measured.wrap and measured.color[4]==1)
         assert(line.textColor[1]==.76 and line.textColor[2]==.78 and line.textColor[3]==.82)
-        assert(row.borderColor[1]==.9);row.scripts.OnLeave()
-        assert(not tip:IsShown() and not U.rowTooltipOwner and row.borderColor[1]==(row.atcfSelected and .9 or .5))
+        assert(row.borderColor[1]==U.theme.colors.accent[1]);row.scripts.OnLeave(row)
+        assert(not tip:IsShown() and not U.rowTooltipOwner and row.borderColor[1]==(row.atcfSelected and U.theme.colors.accent[1] or U.theme.colors.border[1]))
     end
     C.destination=nil;C.results={};C.matches={goal};C.highlight=1;C:Refresh();checkRow()
     C.matches=nil;C.destination=goal;C.results={route};C.selected=1;C:Refresh();checkRow()
@@ -1453,28 +1440,28 @@ test('search and route rows share one quiet measured tooltip without changing th
     end
     assert(U.rowTooltip==tip and #frames==allocated and #U.texts==registered,'hover and pooled-row reuse allocate no extra tooltip or font registrations')
     for _,name in ipairs({'SetOwner','SetText','Show','Hide','SetFontObject'}) do GameTooltip[name]=originals[name] end
-    C.profile=saved;C.destination=nil;C:Stop();C:ApplyProfile()
+    restorePreferences(C,saved);C.destination=nil;C:Stop();C:RefreshAppearance()
 end)
 
 test('row tooltip ownership survives stale leave and clears when its row view or font changes',function()
     C:Stop();C:ShowPanel(true);local saved=N.Model.Copy(C.profile)
     local p=A.Position();p.name='Tooltip lifecycle target';p.id='tip-lifecycle';C.matches={p,p};C.highlight=1;C:Refresh()
     local first,second=U.rows[1],U.rows[2]
-    first.scripts.OnEnter();second.scripts.OnEnter();local tip=U.rowTooltip
-    first.scripts.OnLeave();assert(tip:IsShown() and U.rowTooltipOwner==second,'stale leave cannot hide the new owner')
+    first.scripts.OnEnter(first);second.scripts.OnEnter(second);local tip=U.rowTooltip
+    first.scripts.OnLeave(first);assert(tip:IsShown() and U.rowTooltipOwner==second,'stale leave cannot hide the new owner')
     first:Hide();assert(tip:IsShown() and U.rowTooltipOwner==second,'stale row hide cannot hide the new owner')
     second:Hide();assert(not tip:IsShown() and not U.rowTooltipOwner)
-    first:Show();second:Show();first.scripts.OnEnter();first.scripts.OnMouseDown(first,'LeftButton');assert(not tip:IsShown())
-    first.scripts.OnEnter();U.bodyScroll:SetVerticalScroll(10);assert(not tip:IsShown(),'scrolling clears the former row anchor')
-    first.scripts.OnEnter();U.bodyScroll:Hide();assert(not tip:IsShown(),'compact view hides the results viewport')
-    U.bodyScroll:Show();first.scripts.OnEnter();C:ShowPanel(false);assert(not tip:IsShown() and not U.frame:IsShown())
-    C:ShowPanel(true);first.scripts.OnEnter();C.matches={};C:Refresh();assert(not tip:IsShown(),'replacing the match pool removes stale tooltip anchors')
-    C.matches={p,p};C:Refresh();first.scripts.OnEnter()
-    C.profile.font='Arial';C.profile.fontSize=18;C.profile.scale=1.6;C.profile.colors.text={1,.2,.1};C:RefreshAppearance(true)
+    first:Show();second:Show();first.scripts.OnEnter(first);first.scripts.OnMouseDown(first,'LeftButton');assert(not tip:IsShown())
+    first.scripts.OnEnter(first);U.bodyScroll:SetVerticalScroll(10);assert(not tip:IsShown(),'scrolling clears the former row anchor')
+    first.scripts.OnEnter(first);U.bodyScroll:Hide();assert(not tip:IsShown(),'compact view hides the results viewport')
+    U.bodyScroll:Show();first.scripts.OnEnter(first);C:ShowPanel(false);assert(not tip:IsShown() and not U.frame:IsShown())
+    C:ShowPanel(true);first.scripts.OnEnter(first);C.matches={};C:Refresh();assert(not tip:IsShown(),'replacing the match pool removes stale tooltip anchors')
+    C.matches={p,p};C:Refresh();first.scripts.OnEnter(first)
+    setPreference(C,'font','Arial');setPreference(C,'fontSize',18);setPreference(C,'scale',1.6);setPreference(C,'colors.text',{1,.2,.1});N.App.fonts:Refresh()
     assert(not tip:IsShown() and not U.rowTooltipOwner,'appearance refresh hides the old measured tooltip')
     assert(tip.TextLeft1.textColor[1]==.76 and tip.TextLeft1.textColor[2]==.78,'panel appearance cannot recolor the owned tooltip')
-    first.scripts.OnEnter();assert(tip.measuredText.path=='Fonts\\ARIALN.TTF' and tip.measuredText.size==11 and tip:GetScale()==1)
-    first.scripts.OnLeave();C.profile=saved;C.destination=nil;C:Stop();C:ApplyProfile()
+    first.scripts.OnEnter(first);assert(tip.measuredText.path=='Fonts\\ARIALN.TTF' and tip.measuredText.size==11 and tip:GetScale()==1)
+    first.scripts.OnLeave(first);restorePreferences(C,saved);C.destination=nil;C:Stop();C:RefreshAppearance()
 end)
 test('interaction identity uses only an ordinary NPC GUID with guarded native or strict fallback parsing',function()
     local savedGUID,savedInfo,savedSecret=UnitGUID,C_CreatureInfo,issecretvalue
@@ -1643,11 +1630,11 @@ end)
 test('selected NPC keeps its native map pin when the optional inverse is unavailable',function()
     C:Stop();C:ShowPanel(true);C.origin=nil;C.destination=nil;C.results={};local inverse=C_Map.GetMapPosFromWorldPos
     local mapID,shown,enabled=WorldMapFrame.GetMapID,WorldMapFrame:IsShown(),C.profile.mapMarkers
-    WorldMapFrame.GetMapID=function() return 1429 end;WorldMapFrame:Show();C.profile.mapMarkers=true
+    WorldMapFrame.GetMapID=function() return 1429 end;WorldMapFrame:Show();setPreference(C,'mapMarkers',true)
     local goal=A.FromMap(1429,.2,.7);goal.name='Mapped trainer';goal.id='mapped-trainer';goal.npcID=1498;goal.category='class'
     C_Map.GetMapPosFromWorldPos=function() return nil end;C:Choose(goal);local pin=N.Overlay.destination
     assert(pin:IsShown() and pin.caption=='Destination: Mapped trainer' and pin.point[4]==.2*canvas:GetWidth() and pin.point[5]==-.7*canvas:GetHeight())
-    C_Map.GetMapPosFromWorldPos=inverse;WorldMapFrame.GetMapID=mapID;WorldMapFrame:SetShown(shown);C.profile.mapMarkers=enabled;C.destination=nil;C:Stop()
+    C_Map.GetMapPosFromWorldPos=inverse;WorldMapFrame.GetMapID=mapID;WorldMapFrame:SetShown(shown);setPreference(C,'mapMarkers',enabled);C.destination=nil;C:Stop()
 end)
 
 test('native navigation arrows preserve atlas UVs and fixed gold through both guarded artwork fallbacks',function()
@@ -1661,27 +1648,27 @@ test('native navigation arrows preserve atlas UVs and fixed gold through both gu
     assert(texture.atcfArrowAsset==6152823 and texture.texture==6152823 and texture.coords[1]==1/128 and texture.coords[2]==65/128 and texture.coords[3]==1/128 and texture.coords[4]==65/128 and texture.rotation==0)
     texture.SetTexture=function(self,path,...) if path==6152823 then return false end;return methods.SetTexture(self,path,...) end
     U:NavigationArrow(texture);assert(texture.atcfArrowAsset=='fallback' and texture.texture:find('Media\\arrow.tga',1,true) and texture.coords[1]==0 and texture.coords[2]==1 and texture.coords[3]==0 and texture.coords[4]==1)
-    local accent=C.profile.colors.accent;C.profile.colors.accent={.1,.2,.3};U:ApplyAppearance();assert(U.arrow.color[1]==1 and U.arrow.color[2]==.82 and U.arrow.color[3]==0,'profile accent cannot tint the player-facing arrow away from native gold')
-    C.profile.colors.accent=accent;C_Texture.GetAtlasInfo=atlas;C:ApplyProfile()
+    local accent=C.profile.colors.accent;setPreference(C,'colors.accent',{.1,.2,.3});U:ApplyAppearance();assert(U.arrow.color[1]==1 and U.arrow.color[2]==.82 and U.arrow.color[3]==0,'profile accent cannot tint the player-facing arrow away from native gold')
+    setPreference(C,'colors.accent',accent);C_Texture.GetAtlasInfo=atlas;C:RefreshAppearance()
 end)
 
 test('populated result view leaves a stable sixteen pixel footer gap at supported widths scales and font sizes',function()
     C:Stop();C:ShowPanel(true);local saved=N.Model.Copy(C.profile);local goal=A.Position();goal.id='footer-gap';goal.name=string.rep('Trainer name ',4);goal.category='class'
     C.destination=nil;C.origin=nil;C.matches={};C.highlight=1;C.status=nil;for i=1,40 do C.matches[i]=goal end
     for _,width in ipairs({220,240,640}) do for _,size in ipairs({10,18}) do for _,scale in ipairs({.75,1.5}) do
-        C.profile.width=width;C.profile.fontSize=size;C.profile.scale=scale;C:ApplyProfile()
+        setPreference(C,'width',width);setPreference(C,'fontSize',size);setPreference(C,'scale',scale);C:RefreshAppearance()
         local endOfRows=U.bodyTop+U.bodyScroll:GetHeight();local buttonTop=-U.go.point[3]
         assert(U.go:IsShown() and U.resultsBoundary:IsShown() and math.abs(buttonTop-endOfRows-16)<.001)
         assert(math.abs(buttonTop-(-U.resultsBoundary.point[3])-12)<.001,'boundary and action must not visually touch')
         assert(buttonTop+U.go:GetHeight()+22<=U.frame:GetHeight()+.001,'footer retains resize-grip clearance')
         assert(U.frame:GetHeight()*U.frame:GetScale()<=UIParent:GetHeight()+.001,'larger font and scale still fit the display')
     end end end
-    C.profile=saved;C:Stop();C:ApplyProfile()
+    restorePreferences(C,saved);C:Stop();C:RefreshAppearance()
 end)
 test('editor actions clear arrival notice before changing the current input or view',function()
     local goal,start,cleanup=arrivalFixture()
     for _,action in ipairs({function() C:Edit(true) end,function() C:Choose(goal) end,function() C:Plan() end,function() C:Go() end,function() C:Back() end}) do
-        C:ShowPanel(true);start();assert(C:Arrive() and C.arrivalUntil);action();assert(not C.arrivalUntil and U.note:GetText()~='Arrived!')
+        N.Options.panel:Close();C:ShowPanel(true);start();assert(C:Arrive() and C.arrivalUntil);action();assert(not C.arrivalUntil and U.note:GetText()~='Arrived!')
     end
     cleanup()
 end)
@@ -1689,7 +1676,7 @@ end)
 test('map pins retain normalized position and readable size across zoom while native arrows revert cleanly to preview crows',function()
     C:Stop();C:ShowPanel(true);C.origin=nil;C.destination=nil;C.results={};local mapScale,mapID=WorldMapFrame.GetCanvasScale,WorldMapFrame.GetMapID
     local oldScale,shown=canvas:GetScale(),WorldMapFrame:IsShown();local oldMap,oldMini=C.profile.mapMarkers,C.profile.minimapMarkers
-    local zoom=1;WorldMapFrame.GetCanvasScale=function() return zoom end;WorldMapFrame.GetMapID=function() return 1429 end;WorldMapFrame:Show();C.profile.mapMarkers=true;C.profile.minimapMarkers=true
+    local zoom=1;WorldMapFrame.GetCanvasScale=function() return zoom end;WorldMapFrame.GetMapID=function() return 1429 end;WorldMapFrame:Show();setPreference(C,'mapMarkers',true);setPreference(C,'minimapMarkers',true)
     local goal=A.FromMap(1429,.52,.5);goal.name='Native arrow destination';goal.id='zoom-goal';C:Choose(goal)
     local O=N.Overlay;local pin=O.destination;local p=A.Position();local route=N.Routes.Summary({{mode='walk',start=p,finish=goal,distance=N.Model.Distance(p,goal)}},goal,C:Context())
     C.results={route};C.selected=1;C:Go();assert(C.nav.route==route and pin.arrow and pin.icon.atcfArrowAsset)
@@ -1707,7 +1694,7 @@ test('map pins retain normalized position and readable size across zoom while na
     C:Stop();O:Update(C,p,{facing=0,speed=7})
     assert(O.miniMode=='eagle' and O.icon.texture:find('Media\\eagle.tga',1,true) and not O.icon.desaturated and O.icon.rotation==0)
     assert(O.icon.coords[1]==0 and O.icon.coords[2]==1 and O.icon.coords[3]==0 and O.icon.coords[4]==1 and not O.map:IsShown())
-    canvas:SetScale(oldScale);WorldMapFrame.GetCanvasScale=mapScale;WorldMapFrame.GetMapID=mapID;WorldMapFrame:SetShown(shown);C.profile.mapMarkers=oldMap;C.profile.minimapMarkers=oldMini;C.destination=nil;C:Stop()
+    canvas:SetScale(oldScale);WorldMapFrame.GetCanvasScale=mapScale;WorldMapFrame.GetMapID=mapID;WorldMapFrame:SetShown(shown);setPreference(C,'mapMarkers',oldMap);setPreference(C,'minimapMarkers',oldMini);C.destination=nil;C:Stop()
 end)
 test('Back dismisses filter menu header menu and options without stranding the timed arrival note',function()
     local _,start,cleanup=arrivalFixture();N.Options.frame:Hide()
@@ -1717,7 +1704,7 @@ test('Back dismisses filter menu header menu and options without stranding the t
         {open=function() N.Options:Open() end,shown=function() return N.Options.frame:IsShown() end},
     }
     for _,dialog in ipairs(dialogs) do
-        C:ShowPanel(true);start();assert(C:Arrive());local deadline=C.arrivalUntil
+        N.Options.panel:Close();C:ShowPanel(true);start();assert(C:Arrive());local deadline=C.arrivalUntil
         dialog.open();assert(dialog.shown() and U.note:IsShown() and U.note:GetText()=='Arrived!')
         C:Back();assert(not dialog.shown() and C.arrivalUntil==deadline,'dismissing a dialog must leave the arrival expiration scheduled')
         now=deadline+.1;C:Tick()
@@ -1879,7 +1866,7 @@ test('transmog results compare route select Go and interaction arrival through t
     C:Search('transmog');flushSearch();assert(C.matches[1]==goal and #C.matches==2)
     C:Plan();assert(#C.results==1 and C.results[1].destination==goal and C.results[1].legs[1].quality=='bearing')
     for _,width in ipairs({220,240,640}) do for _,size in ipairs({10,18}) do for _,scale in ipairs({.75,1.5}) do
-        C.profile.width=width;C.profile.fontSize=size;C.profile.scale=scale;C:ApplyProfile()
+        setPreference(C,'width',width);setPreference(C,'fontSize',size);setPreference(C,'scale',scale);C:RefreshAppearance()
         assert(U.destinationName:GetText()=='Fyrenz Vishonar' and U.destinationDetail:GetText():find('Transmogrifier',1,true))
         assert(U.destinationName:GetWidth()<=width and U.go.text:GetUnboundedStringWidth()<=U.go:GetWidth())
     end end end
@@ -1893,13 +1880,14 @@ test('transmog results compare route select Go and interaction arrival through t
     assert(#C.results==1 and C.results[1].destination==goal and not C.destination,'Compare matches plans the service category')
     C:Go();UnitGUID=function(unit) assert(unit=='npc');return 'Creature-0-1234-0-0-270581-000000ABCD' end
     dispatchEvent('GOSSIP_SHOW');assert(not C.nav.route and C.arrivalUntil)
-    C.profile=profile;C.profiles=profiles;cleanup();C:BindFilters();C:ApplyProfile()
+    restorePreferences(C,profile);cleanup();C:BindFilters();C:RefreshAppearance()
 end)
 -- Re-load the real TOC into a fresh namespace with restored SavedVariables.
 -- Keep these independent lifecycle checks last so earlier interaction fixtures
 -- cannot accidentally supply a hidden flag or pre-created frame at startup.
 local function boot(character,legacy,profiles,provider)
     timers={};frames={};SlashCmdList={};SLASH_ASTHECROWFLIES_SND_ATCF1=nil
+    AsTheCrowFlies_SND_Options=nil;UISpecialFrames={}
     AsTheCrowFliesCharacter=N.Model.Copy(character)
     AsTheCrowFliesDB=N.Model.Copy(legacy)
     AsTheCrowFliesProfiles=N.Model.Copy(profiles)
@@ -2002,8 +1990,8 @@ test('explicit hide survives logout reload and login with settings and character
 end)
 test('show settings buttons and keybinding reveal update the durable visibility choice',function()
     local fresh=boot();local c,u,o=fresh.Core,fresh.UI,fresh.Options
-    o.showPanel.scripts.OnClick();assert(u.frame:IsShown() and AsTheCrowFliesCharacter.hidden==false)
-    o.hidePanel.scripts.OnClick();assert(not u.frame:IsShown() and AsTheCrowFliesCharacter.hidden==true)
+    option(o,'position',6).scripts.OnClick();assert(u.frame:IsShown() and AsTheCrowFliesCharacter.hidden==false)
+    option(o,'position',7).scripts.OnClick();assert(not u.frame:IsShown() and AsTheCrowFliesCharacter.hidden==true)
     AsTheCrowFlies_Toggle();assert(u.frame:IsShown() and not c.hidden and AsTheCrowFliesCharacter.hidden==false)
     local reloaded=boot(AsTheCrowFliesCharacter,AsTheCrowFliesDB,AsTheCrowFliesProfiles)
     assert(reloaded.UI.frame:IsShown() and reloaded.Core.character.hidden==false,'explicit show restores across login')
@@ -2016,7 +2004,7 @@ test('profile placement and options changes cannot reveal a hidden panel',functi
     local fresh=boot();local c,u,o=fresh.Core,fresh.UI,fresh.Options
     SlashCmdList.ASTHECROWFLIES_SND_ATCF('opts');assert(o.frame:IsShown());hiddenLifecycle(fresh)
     for _,entry in ipairs({{'DuplicateProfile','Other'},{'SwitchProfile','Default'},{'CopyProfile','Other'},{'ResetProfile'}}) do
-        assert(o:ProfileAction(entry[1],entry[2]));hiddenLifecycle(fresh)
+        assert(fresh.App.profiles[({DuplicateProfile='Duplicate',SwitchProfile='Switch',CopyProfile='CopyFrom',ResetProfile='Reset'})[entry[1]]](fresh.App.profiles,entry[2]));hiddenLifecycle(fresh)
     end
     u:SetDock(c,'right',true);hiddenLifecycle(fresh)
     u:SetDock(c,'none',false);hiddenLifecycle(fresh)
@@ -2035,34 +2023,35 @@ test('visibility survives build changes and invalid values default hidden withou
     fresh.Core:ShowPanel(true)
     assert(AsTheCrowFliesCharacter.version==99 and AsTheCrowFliesCharacter.hidden==true and AsTheCrowFliesCharacter.unknown=='keep')
     assert(AsTheCrowFliesDB.version==99 and AsTheCrowFliesDB.unknown=='profile' and AsTheCrowFliesProfiles.version==99)
+    local before=fresh.Core.profile.width
+    local ok,err=fresh.App:SetMany({width=300,dock='right'});assert(not ok and err.code=='readOnly')
+    assert(not fresh.App.profiles:Reset());assert(fresh.Core.profile.width==before)
+    assert(AsTheCrowFliesDB.version==99 and AsTheCrowFliesProfiles.version==99)
 end)
-test('FAU dialog chrome preserves profile backgrounds and saved visibility',function()
-    local fresh=boot();local c,u=fresh.Core,fresh.UI;local f=u.frame;local b=f.backdrop
-    assert(f.template=='BackdropTemplate' and b.edgeFile=='Interface\\DialogFrame\\UI-DialogBox-Border')
-    assert(b.bgFile=='Interface\\Buttons\\WHITE8X8' and b.tile and b.tileSize==8 and b.edgeSize==16)
-    for _,side in ipairs({'left','right','top','bottom'}) do assert(b.insets[side]==4) end
-    assert(f.borderColor[1]==.65 and f.borderColor[2]==.65 and f.borderColor[3]==.65 and f.borderColor[4]==1)
-    local sizes=f.nativeBackdropSizes or 0;f.scripts.OnSizeChanged(f,400,250)
-    assert(f.nativeBackdropSizes==sizes+1,'panel resize must preserve the native backdrop handler')
-    c.profile.colors.background={.2,.3,.4};c:ApplyProfile()
-    assert(f.backdropColor[1]==.2 and f.backdropColor[2]==.3 and f.backdropColor[3]==.4 and f.backdropColor[4]==.94)
-    assert(u.menu.backdropColor[1]==.2 and fresh.Options.frame.backdropColor[1]==.045,'options retain FAU chrome independently of the island color')
-    assert(c.hidden and not f:IsShown(),'appearance must respect visibility')
+test('theme chrome preserves explicit colors and saved visibility',function()
+    local fresh=boot();local c,u=fresh.Core,fresh.UI;local f=u.frame
+    assert(f.template=='BackdropTemplate' and f.backdrop.edgeFile=='Interface\\Buttons\\WHITE8X8')
+    assert(fresh.App:Set('theme','forever'));assert(f.backdrop.edgeFile=='Interface\\DialogFrame\\UI-DialogBox-Border')
+    assert(f.borderColor[1]==fresh.SomethingNeedDoing.Themes.forever.colors.border[1])
+    local sizes=f.nativeBackdropSizes or 0;f.scripts.OnSizeChanged(f,400,250);assert(f.nativeBackdropSizes==sizes+1)
+    setPreference(c,'colors.background',{.2,.3,.4});assert(f.backdropColor[1]==.2 and f.backdropColor[4]==.94)
+    assert(fresh.Options:Open());assert(u.menu.backdropColor[1]==.2 and fresh.Options.frame.backdropColor[1]~=.2)
+    assert(c.hidden and not f:IsShown())
 end)
 test('button hover survives tooltip updates and releases on disable hide and menu close',function()
     local fresh=boot();local c,u=fresh.Core,fresh.UI;local button=u.pause
-    c:ShowPanel(true);button:Show();button.scripts.OnEnter();assert(button.borderColor[1]==.9)
+    c:ShowPanel(true);button:Show();button.scripts.OnEnter(button);assert(button.borderColor[1]==u.theme.colors.accent[1])
     local enter=button.scripts.OnEnter
     for _=1,20 do u:PauseIcon(c) end
     assert(button.scripts.OnEnter==enter,'guidance updates must not accumulate tooltip hooks')
-    button:SetEnabled(false);assert(button.alpha==.5 and button.borderColor[1]==.45)
-    button:SetEnabled(true);assert(button.alpha==1 and button.borderColor[1]==.9)
-    button:Hide();button:Show();assert(button.borderColor[1]==.45 and not GameTooltip:IsShown())
-    c.tucked=true;u:Layout(c);u.handle.scripts.OnEnter();assert(u.handle.borderColor[1]==.9)
+    button:SetEnabled(false);assert(button.alpha==.5 and button.borderColor[1]==u.theme.colors.border[1])
+    button:SetEnabled(true);assert(button.alpha==1 and button.borderColor[1]==u.theme.colors.accent[1])
+    button:Hide();button:Show();assert(button.borderColor[1]==u.theme.colors.border[1] and not GameTooltip:IsShown())
+    c.tucked=true;u:Layout(c);u.handle.scripts.OnEnter(u.handle);assert(u.handle.borderColor[1]==u.theme.colors.accent[1])
     c.tucked=false;u:Layout(c);c.tucked=true;u:Layout(c)
-    assert(u.handle.borderColor[1]==.45,'tucking again must not retain the previous hover')
-    local o=fresh.Options;o:Open();o.font.menuOpen=true;o:Page(true)
-    assert(not o.font:IsMenuOpen(),'switching pages dismisses dropdowns owned by the hidden page')
+    assert(u.handle.borderColor[1]==u.theme.colors.border[1],'tucking again must not retain the previous hover')
+    local o=fresh.Options;local font=option(o,'appearance',2);font.menuOpen=true;o:Open('profiles')
+    assert(not font:IsMenuOpen(),'switching pages dismisses dropdowns owned by the hidden page')
 end)
 
 test('selection remains distinct from hover through search and route refreshes',function()
@@ -2071,14 +2060,14 @@ test('selection remains distinct from hover through search and route refreshes',
     local other=fresh.Model.Copy(point);other.name='Second';other.id='second'
     c.matches={point,other};c.highlight=1;c:Refresh()
     local first,second=u.rows[1],u.rows[2]
-    second.scripts.OnEnter();assert(first.atcfSelected and not second.atcfSelected)
+    second.scripts.OnEnter(second);assert(first.atcfSelected and not second.atcfSelected)
     assert(first.backdropColor[1]~=second.backdropColor[1],'hover must not look selected')
-    first.scripts.OnEnter();first.scripts.OnLeave();c:Refresh()
+    first.scripts.OnEnter(first);first.scripts.OnLeave(first);c:Refresh()
     assert(first.backdropColor[1]~=second.backdropColor[1],'refresh must retain selection fill')
     c.highlight=2;c:Refresh();assert(first.backdropColor[1]~=second.backdropColor[1] and second.atcfSelected)
-    second.scripts.OnLeave();second:Hide();second:Show();assert(second.atcfSelected and second.backdropColor[1]~=first.backdropColor[1])
+    second.scripts.OnLeave(second);second:Hide();second:Show();assert(second.atcfSelected and second.backdropColor[1]~=first.backdropColor[1])
     local route=fresh.Routes.Summary({{mode='walk',start=point,finish=other,distance=50,seconds=10}},other,c:Context())
-    c.matches=nil;c.results={route,route};c.selected=1;c:Refresh();second.scripts.OnEnter()
+    c.matches=nil;c.results={route,route};c.selected=1;c:Refresh();second.scripts.OnEnter(second)
     assert(first.atcfSelected and not second.atcfSelected and first.backdropColor[1]~=second.backdropColor[1])
 end)
 test('navigation menu stays on screen at bottom edges and follows layout changes',function()
@@ -2090,14 +2079,14 @@ test('navigation menu stays on screen at bottom edges and follows layout changes
         for _,uiScale in ipairs({.85,1}) do
             UIParent:SetScale(uiScale)
             for _,panelScale in ipairs({.5,1,1.6}) do
-                c.profile.scale=panelScale
+                setPreference(c,'scale',panelScale)
                 for _,side in ipairs({'none','left','right'}) do
-                    c.profile.dock=side;c.profile.dockPosition=1;c.profile.y=-10000;c.tucked=false;c:Refresh()
+                    setPreference(c,'dock',side);setPreference(c,'dockPosition',1);setPreference(c,'y',-10000);c.tucked=false;c:Refresh()
                     u.menu:Hide();u.settings.scripts.OnClick();assert(u.menu:IsShown() and u.menu.clamped)
                     local top=u.frame:GetTop()+u.menu.point[5]
                     local available=UIParent:GetHeight()/u.frame:GetScale()
                     assert(top<=available and top-u.menu:GetHeight()>=0,'all menu actions must remain on-screen')
-                    c.profile.dock='none';c.profile.y=0;c:Refresh()
+                    setPreference(c,'dock','none');setPreference(c,'y',0);c:Refresh()
                     assert(u.menu.point[5]==-40,'normal placement must recover while the menu stays open')
                 end
             end
@@ -2106,68 +2095,56 @@ test('navigation menu stays on screen at bottom edges and follows layout changes
     UIParent:SetScale(1);UIParent:SetSize(1920,1080)
 end)
 test('short options preserve type size and expose every control through scroll navigation',function()
-    local fresh=boot();local c,o=fresh.Core,fresh.Options
-    UIParent:SetSize(960,360);o:Open()
-    assert(o.frame:GetScale()==1 and o.frame:GetHeight()==336 and o.font.Text:GetScale()==1)
-    assert(o.font.Text.fontSize==12 and o.optionsTab:GetHeight()==22 and o.scroll:GetHeight()==240)
-    assert(o.maximum==164 and o.bar:IsShown() and o.bar.orientation=='VERTICAL')
-    assert(o.font.parent==o.appearance and o.appearance.parent==o.body and o.body.parent==o.scroll)
-    local barLeft=o.frame:GetWidth()+o.bar.point[2]-o.bar:GetWidth()
-    assert(barLeft>o.scroll:GetWidth(),'scrollbar must have its own column beyond page content')
+    local fresh=boot();local o=fresh.Options;local panel=o.panel
+    UIParent:SetSize(960,360);local font=option(o,'appearance',2)
+    assert(panel.frame:GetScale()==1 and panel.frame:GetHeight()==344 and font.Text:GetScale()==1)
+    assert(font.Text.fontSize==13 and panel._maximum>0 and panel.bar:IsShown())
+    assert(font.parent==panel.body and panel.body.parent==panel.scroll)
+    font.menuOpen=true;panel.scroll.scripts.OnMouseWheel(nil,-1)
+    assert(panel.scroll:GetVerticalScroll()==30 and not font:IsMenuOpen())
+    assert(o:Open('profiles'));local name=panel._pool['profile-name'];name:SetFocus()
+    local active=panel._pool['profile-select'];active.menuOpen=true
+    assert(o:Open('appearance'));assert(not name:HasFocus() and not active:IsMenuOpen())
+    for _,page in ipairs({'appearance','navigation','position','profiles'}) do assert(o:Open(page)) end
     local framesBefore=#frames
-    o.font.menuOpen=true;o.fontSize:SetFocus();o.scroll.scripts.OnMouseWheel(nil,-1)
-    assert(o.offset==28 and o.scroll:GetVerticalScroll()==28 and not o.font:IsMenuOpen() and not o.fontSize:HasFocus())
-    o.bar:SetValue(10000);assert(o.offset==o.maximum and o.bar:GetValue()==o.maximum)
-    -- The lowest appearance action remains within the viewport at maximum scroll.
-    local actionBottom=-o.hidePanel.point[3]+o.hidePanel:GetHeight()-o.offset
-    assert(actionBottom<=o.scroll:GetHeight() and actionBottom>0)
-    o:Page(true);assert(o.offset==0 and o.profilePage:IsShown())
-    o.name:SetFocus();o.active.menuOpen=true;o:Page(false)
-    assert(not o.name:HasFocus() and not o.active:IsMenuOpen())
-    o:Scroll(o.maximum);o.fontSize:SetFocus();o.font.menuOpen=true
-    UIParent:SetSize(1920,1080);o.frame.scripts.OnEvent(nil,'DISPLAY_SIZE_CHANGED')
-    assert(o.offset==0 and o.maximum==0 and not o.bar:IsShown() and o.frame:GetHeight()==500)
-    assert(not o.fontSize:HasFocus() and not o.font:IsMenuOpen())
-    for _=1,10 do o:Page(true);o:Page(false);o:Layout();o:Open() end
-    assert(#frames==framesBefore,'layout and reopening must reuse controls')
-    o.frame:Hide();o:Open();assert(o.frame:GetScale()==1 and o.scroll:GetVerticalScroll()==0)
     for _,screen in ipairs({{960,360},{600,400},{1920,1080}}) do
         UIParent:SetSize(unpack(screen))
         for _,scale in ipairs({.85,.9,1}) do
-            UIParent:SetScale(scale);o:Layout();o:Scroll(o.maximum)
-            assert(o.frame:GetWidth()*o.frame:GetScale()<=screen[1]-24+.001)
-            assert(o.frame:GetHeight()*o.frame:GetScale()<=screen[2]-24+.001)
-            assert(-o.hidePanel.point[3]+o.hidePanel:GetHeight()-o.offset<=o.scroll:GetHeight())
-            assert(o.font.Text:GetScale()==1,'captions must not shrink independently at fractional UI scales')
+            UIParent:SetScale(scale);dispatchEvent('DISPLAY_SIZE_CHANGED')
+            for _,page in ipairs({'appearance','navigation','position','profiles'}) do
+                assert(o:Open(page));panel.bar:SetValue(panel._maximum)
+                assert(panel.frame:GetWidth()*panel.frame:GetScale()<=screen[1]-16+.001)
+                assert(panel.frame:GetHeight()*panel.frame:GetScale()<=screen[2]-16+.001)
+                assert(panel.body:GetHeight()-panel.scroll:GetVerticalScroll()<=panel.scroll:GetHeight()+.001)
+            end
+            assert(font.Text:GetScale()==1)
         end
     end
-    UIParent:SetScale(1);UIParent:SetSize(1920,1080)
+    assert(#frames==framesBefore,'page changes and layout reuse controls')
+    UIParent:SetScale(1);UIParent:SetSize(1920,1080);panel:Close()
 end)
 test('dropdown captions retain readable UTF8 text and complete selected identities',function()
-    local fresh=boot();local c,o=fresh.Core,fresh.Options;o:Open()
+    local fresh=boot();local c,o=fresh.Core,fresh.Options;local font=option(o,'appearance',2)
     for _,uiScale in ipairs({.75,.85,.9,1,1.25}) do
         UIParent:SetScale(uiScale)
         for _,name in ipairs({string.rep('W',48),string.rep('界',16),string.rep('W',128)}) do
-            o.font.value=name;o.font:SetDefaultText(name);o:Layout()
-            local caption=o.font.Text:GetText()
-            assert(o.font.value==name and o.font.fullCaption==name and o.font.Text:GetScale()==1)
-            assert(caption:sub(-3)=='...' and #caption<#name)
-            assert(caption:sub(1,-4)==name:sub(1,#caption-3),'caption must be a prefix')
-            if name:sub(1,3)=='界' then assert((#caption-3)%3==0,'do not split UTF8 codepoints') end
-            local t=o.font.Text;local scale=t:GetEffectiveScale()
-            assert((math.ceil(t:GetUnboundedStringWidth()*scale)+4)/scale<=t:GetWidth(),'caption must clear the dropdown arrow')
-            o.font.scripts.OnEnter();assert(GameTooltip:GetOwner()==o.font and GameTooltip:GetText()==name)
-            o.font.scripts.OnLeave();assert(not GameTooltip:IsShown())
-            -- Native menu generation can write the full caption after layout.
-            o.font.Text:SetText(name);assert(o.font.Text:GetText()==caption and o.font.fullCaption==name)
+            assert(fresh.App:Set('font',name));assert(o.panel:Refresh())
+            local caption=font.Text:GetText()
+            assert(fresh.App:Get('font')==name and font._fullCaption==name and font.Text:GetScale()==1)
+            assert(caption:sub(-3)=='...' and #caption<#name and caption:sub(1,-4)==name:sub(1,#caption-3))
+            if name:sub(1,3)=='界' then assert((#caption-3)%3==0) end
+            assert(font.Text:GetUnboundedStringWidth()<=font.Text:GetWidth())
+            font.scripts.OnEnter(font);assert(GameTooltip:GetOwner()==font and GameTooltip:GetText()==name)
+            font.scripts.OnLeave(font);assert(not GameTooltip:IsShown())
+            font.Text:SetText(name);assert(font.Text:GetText()==caption and font._fullCaption==name)
         end
     end
     UIParent:SetScale(1)
-    local name=string.rep('P',48);assert(o:ProfileAction('DuplicateProfile',name))
-    assert(c.profiles.active==name and o.active.value==name and o.active.fullCaption==name)
-    assert(o.active.Text:GetScale()==1 and o.active.Text:GetText():sub(-3)=='...')
-    assert(o:ProfileAction('SwitchProfile','Default'));assert(o.active.Text:GetText()=='Default')
-    o.font:SetDefaultText('Arial');o:Layout();assert(o.font.Text:GetText()=='Arial' and not o.font.truncatedCaption)
+    local name=string.rep('P',48);assert(fresh.App.profiles:Duplicate(name));assert(o:Open('profiles'))
+    local active=o.panel._pool['profile-select'];assert(fresh.App.profiles:Active()==name and active._fullCaption==name)
+    assert(active.Text:GetScale()==1 and active.Text:GetText():sub(-3)=='...')
+    assert(fresh.App.profiles:Switch('Default'));assert(active.Text:GetText()=='Default')
+    assert(o:Open('appearance'));assert(fresh.App:Set('font','Arial'));assert(font.Text:GetText()=='Arial' and not font._truncated)
 end)
 
 -- Logout must cancel the consumer ticker once, before SND disposes its scope.

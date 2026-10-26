@@ -7,7 +7,7 @@ A compact navigation island that helps you find NPCs and saved places, compare w
 - Search by NPC name or role, with filters for services, classes and professions.
 - Compare walking and flight routes by distance or estimated travel time, using your discovered flight points.
 - Compass guidance, world-map destination pins and flight paths, and minimap markers.
-- Per-character profiles, customizable fonts and colors, and a resizable panel that tucks to either screen edge.
+- Per-character profiles, Modern and WoW Forever themes, customizable fonts and colors, and a resizable panel that tucks to either screen edge.
 
 For World of Warcraft: Forever. Travel times are estimates; ground directions are compass bearings. Movement and flight selection stay manual.
 

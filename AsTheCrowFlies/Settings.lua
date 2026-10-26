@@ -1,13 +1,13 @@
 local _,N=...; local M=N.Model; local S={}; N.Settings=S
 S.minWidth=220;S.maxWidth=640
-S.defaults={version=1,layoutVersion=2,width=240,resultsHeight=296,scale=1,font="Expressway",fontSize=13,locked=false,dock="none",dockPosition=.5,strata="HIGH",x=24,y=-180,mapMarkers=true,minimapMarkers=true,flightPrior=32,routeOrder="distance",
+S.defaults={theme="modern",version=1,layoutVersion=2,width=240,resultsHeight=296,scale=1,font="Expressway",fontSize=13,locked=false,dock="none",dockPosition=.5,strata="HIGH",x=24,y=-180,mapMarkers=true,minimapMarkers=true,flightPrior=32,routeOrder="distance",
     colors={background={.045,.045,.05},accent={.78,.85,.61},text={.93,.94,.97}},searchFilters={categories={},classes={},professions={}}}
+local filterKeys={categories={"class","profession","auction","transmog","quest","trainer","flight","place"},
+    classes={"WARRIOR","PALADIN","HUNTER","ROGUE","PRIEST","SHAMAN","MAGE","WARLOCK","DRUID"},
+    professions={"Alchemy","Blacksmithing","Enchanting","Engineering","Herbalism","Leatherworking","Mining","Skinning","Tailoring","Cooking","First Aid","Fishing"}}
 function S.Filters(saved)
     saved=type(saved)=="table" and saved or {};local clean={categories={},classes={},professions={}}
-    local allowed={categories={"class","profession","auction","transmog","quest","trainer","flight","place"},
-        classes={"WARRIOR","PALADIN","HUNTER","ROGUE","PRIEST","SHAMAN","MAGE","WARLOCK","DRUID"},
-        professions={"Alchemy","Blacksmithing","Enchanting","Engineering","Herbalism","Leatherworking","Mining","Skinning","Tailoring","Cooking","First Aid","Fishing"}}
-    for group,values in pairs(allowed) do
+    for group,values in pairs(filterKeys) do
         local source=type(saved[group])=="table" and saved[group] or {}
         for _,value in ipairs(values) do if source[value]==true then clean[group][value]=true end end
     end
@@ -35,6 +35,7 @@ function S.Load(saved,build)
     p.x=math.max(-20000,math.min(20000,p.x));p.y=math.max(-20000,math.min(20000,p.y))
     if p.dock~="left" and p.dock~="right" then p.dock="none" end
     if p.strata~="LOW" and p.strata~="MEDIUM" and p.strata~="HIGH" then p.strata=S.defaults.strata end
+    if p.theme~="forever" then p.theme="modern" end
     if p.routeOrder~="time" then p.routeOrder="distance" end
     if #p.font==0 or #p.font>128 or p.font:find("%c") then p.font="Expressway" end
     local colors=type(saved.colors)=="table" and saved.colors or {}
@@ -159,4 +160,67 @@ end
 function S.Timing(store,key)
     local list=store[key];if not list or #list==0 then return nil end
     local sum=0;for _,s in ipairs(list) do sum=sum+s end;return sum/#list,#list
+end
+
+-- SND stages this adapter's copies before replacing either legacy saved global.
+-- The schema and character navigation data remain ATCF's responsibility.
+local function put(values,path,value)
+    local keys={};for key in path:gmatch('[^.]+') do keys[#keys+1]=key end
+    for i=1,#keys-1 do values[keys[i]]=values[keys[i]] or {};values=values[keys[i]] end
+    values[keys[#keys]]=M.Copy(value)
+end
+function S.Declaration()
+    local fields={}
+    local bounds={width={220,640},resultsHeight={100,560},scale={.5,1.6},fontSize={10,18},dockPosition={0,1},x={-20000,20000},y={-20000,20000},flightPrior={10,60}}
+    local enums={dock={"none","left","right"},strata={"LOW","MEDIUM","HIGH"},routeOrder={"distance","time"},theme={"modern","forever"}}
+    for key,value in pairs(S.defaults) do
+        if key~='version' and key~='layoutVersion' and type(value)~='table' then
+            local field={type=type(value),default=value};fields[key]=field
+            if key=='font' then field.type='font';field.maxLength=128 end
+            if key=='fontSize' then field.type='integer' end
+            if bounds[key] then field.min=bounds[key][1];field.max=bounds[key][2] end
+            if enums[key] then field.type='enum';field.values=enums[key] end
+        end
+    end
+    for key,value in pairs(S.defaults.colors) do fields['colors.'..key]={type='color',default=M.Copy(value)} end
+    -- Filter keys containing spaces need stable identifier paths, not raw labels.
+    for group,keys in pairs(filterKeys) do for _,key in ipairs(keys) do
+        fields['filters.'..group..'.'..key:gsub(' ','_')]={type='boolean',default=false}
+    end end
+    local function result(db,readOnly)
+        local values=M.Copy(db.profiles[db.active]);values.filters={}
+        for group,keys in pairs(filterKeys) do values.filters[group]={};for _,key in ipairs(keys) do values.filters[group][key:gsub(' ','_')]=values.searchFilters[group][key]==true end end
+        local names={};for name in pairs(db.profiles) do names[#names+1]=name end;table.sort(names)
+        return {state={values=values,database=db,activeProfile=db.active,readOnly=readOnly==true,
+            profiles={names=names,operations={switch=true,duplicate=true,copy=true,reset=true}}},
+            saved=not readOnly and {AsTheCrowFliesProfiles=db,AsTheCrowFliesDB=db.profiles[db.active]} or nil}
+    end
+    local adapter={}
+    function adapter:Restore(saved)
+        local db,readOnly=S.Profiles(saved.AsTheCrowFliesProfiles,saved.AsTheCrowFliesDB)
+        return true,result(db,readOnly)
+    end
+    function adapter:Prepare(state,operation)
+        local db=state.database;local kind=operation.kind
+        if kind=='set' or kind=='patch' then
+            local changes=kind=='set' and {[operation.path]=operation.value} or operation.values
+            local profile=db.profiles[db.active]
+            for path,value in pairs(changes) do
+                local group,key=path:match('^filters%.([^.]+)%.([^.]+)$')
+                if group then profile.searchFilters[group][key:gsub('_',' ')]=value and true or nil else put(profile,path,value) end
+            end
+        else
+            local action=({switch='SwitchProfile',duplicate='DuplicateProfile',copy='CopyProfile',reset='ResetProfile'})[kind]
+            if not action then return false,{code='unsupported',message='Unsupported profile action'} end
+            local profile,err=S[action](db,operation.name)
+            if not profile then return false,{code='profile',message=err} end
+        end
+        return true,result(db)
+    end
+    return {savedVariables={'AsTheCrowFliesProfiles','AsTheCrowFliesDB'},fields=fields,adapter=adapter}
+end
+function S.FilterPatch(filter)
+    local values={}
+    for group,keys in pairs(filterKeys) do for _,key in ipairs(keys) do values['filters.'..group..'.'..key:gsub(' ','_')]=filter[group][key]==true end end
+    return values
 end

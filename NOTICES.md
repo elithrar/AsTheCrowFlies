@@ -47,4 +47,4 @@ CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
 ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 POSSIBILITY OF SUCH DAMAGE.
 
-SomethingNeedDoing 0.3.0 by Matt Silverlock is bundled under Apache-2.0. See `Libs/SomethingNeedDoing/LICENSE` for the full license and `Libs/SomethingNeedDoing/UPSTREAM.json` for source provenance.
+SomethingNeedDoing 0.4.0 by Matt Silverlock is bundled under Apache-2.0. See `Libs/SomethingNeedDoing/LICENSE` for the full license and `Libs/SomethingNeedDoing/UPSTREAM.json` for source provenance.

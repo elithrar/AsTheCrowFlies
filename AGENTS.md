@@ -27,12 +27,20 @@ Run commands from the repository root. CI uses Python 3.12. If the Lua test depe
 
 ## UI and delivery
 
-- Use FindAnUpgrade as the window design standard: shared dialog borders, dark tooltip-bordered buttons with gold hover edges, native search-field artwork and centered dropdown labels. Reuse shared chrome, font, layout and native-icon helpers. Check changed layouts at supported widths, font sizes and scales; size controls from measured text.
+- Use SND for the options shell, themes, font resolution and shared chrome. Keep navigation arrows gold and preserve result selection and eligibility feedback. The custom navigation view owns its measured layout and native artwork. Check supported widths, font sizes and scales after typography settles.
 - For installation work, preserve SavedVariables, unrelated addons and backups, and verify installed files against the built package.
 - For release work, follow [RELEASING.md](docs/RELEASING.md). Merging does not publish: the workflow needs an annotated version tag whose commit is reachable from `origin/main`, matching the TOC and release notes. Keep published tags/assets immutable and reconcile unresolved CurseForge upload markers before retrying.
 
 ## SomethingNeedDoing dependency
 
-`AsTheCrowFlies/Libs/SomethingNeedDoing/UPSTREAM.json` pins the bundled SND runtime and its file hashes. Keep its Lua files and Apache license byte-identical to that commit; fix framework issues upstream. Load order is explicit in the TOC. `Core.lua` creates the private app and core scope; SND owns ordinary core event subscriptions and slash commands. Check the `ok, valueOrError` tuple at registration boundaries. Scoped logout callbacks run before disposal in SND 0.3.0; keep ticker cancellation in the core scope.
+`AsTheCrowFlies/Libs/SomethingNeedDoing/UPSTREAM.json` pins the bundled SND runtime and its file hashes. Keep its Lua files and Apache license byte-identical to that commit; fix framework issues upstream. Load order is explicit in the TOC. Use the pinned upstream `API.md` for signatures and return contracts.
 
-SavedVariables and gameplay models retain their existing owners. Do not copy a live settings table into SND state and continue mutating both. A future settings/UI migration must cover every write path, including profile changes, previews, drag and dock callbacks, together. Use the pinned upstream `API.md` for API contracts; this file describes consumer boundaries rather than duplicating the API.
+`Settings.lua` supplies the legacy persistence adapter through `Settings.Declaration()`. SND stages and publishes both preference globals; the adapter preserves ATCF's schema, profile migrations and future-schema read-only behavior. Character discovery, timings, places and visibility remain in the separate character model. Do not add a second writable preference store.
+
+`Core.profile` is a read snapshot. Change preferences through `App:Set(path, value)` or `Core:SetPreferences(pathValueMap)` and check the Result. Related geometry fields and filter leaves belong in one `SetMany` transaction. `Settings.FilterPatch()` maps domain filter labels to declared paths. Profile commands use `App.profiles`; never mutate `AsTheCrowFliesProfiles` or snapshot tables directly.
+
+`Options.lua` declares the shared pages and SND profiles page. Color callbacks repaint transiently; only acceptance commits. `UI.lua` retains navigation layout, native artwork and selection feedback while delegating fonts and themed chrome to SND. Appearance notifications trigger measurement after fonts settle; retain native gold for navigation and explicit custom colors.
+
+Native movement and resizing use a consumer generation to reject stale gestures after profile switch/copy/reset or external geometry changes. Only the gesture's own atomic commits may retain that generation. Layout must not write preferences from inside a settings notification. Scoped logout cancels the navigation ticker before SND disposal.
+
+Update this guidance when ownership changes, the user-facing behavior contract in `docs/BEHAVIOR.md` when behavior changes, and examples alongside the API they exercise. Keep implementation details in their authoritative files.
