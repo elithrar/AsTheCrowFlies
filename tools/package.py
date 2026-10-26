@@ -46,7 +46,7 @@ def build(root=ROOT, local_data=False, release=False):
     expected = {'Libs/SomethingNeedDoing/LICENSE', 'Libs/SomethingNeedDoing/UPSTREAM.json', 'AsTheCrowFlies.toc', 'Bindings.xml', *members, *(f'Media/{name}.tga' for name in MEDIA)}
     upstream = addon / "Libs/SomethingNeedDoing"
     pin = json.loads((upstream / "UPSTREAM.json").read_text())
-    assert pin["version"] == "0.4.0" and pin["commit"] == "002e884fa08cff16b0a691bfd354186106fc04b9"
+    assert pin["version"] == "0.4.0" and pin["commit"] == "83434ef8d9141cca1309de3948109a894862bf48"
     assert set(pin["sha256"]) == {"Core.lua", "Diagnostics.lua", "Scope.lua", "State.lua", "Settings.lua", "UI.lua", "Options.lua", "LICENSE"}
     for name, checksum in pin["sha256"].items():
         assert hashlib.sha256((upstream / name).read_bytes()).hexdigest() == checksum, name

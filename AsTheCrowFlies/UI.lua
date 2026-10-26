@@ -1,11 +1,22 @@
 local _,N=...;local M=N.Model;local U={texts={}};N.UI=U
 local MEDIA="Interface\\AddOns\\AsTheCrowFlies\\Media\\"
 local gold={1,.82,0};local ink={.93,.94,.97}
+-- A native refusal should be visible without repeating a warning on every layout.
+local appearanceFailures=setmetatable({}, {__mode='k'})
+local function checkAppearance(object,operation,ok,err)
+    local failures=appearanceFailures[object]
+    if ok then if failures then failures[operation]=nil end;return end
+    if not failures then failures={};appearanceFailures[object]=failures end
+    if failures[operation]~=err.code then
+        failures[operation]=err.code
+        N.App.log:Warn('Appearance unavailable',{operation=operation,code=err.code,reason=err.message})
+    end
+end
 -- Framework chrome follows the selected theme; ATCF retains selection feedback.
 local buttonStyle={fill={.06,.06,.065,.8},border={.45,.45,.45,.65},hover={.9,.8,.5,.9}}
 local cardStyle={selected={.16,.14,.075,.96},fill={.045,.045,.05,.96},border={.5,.5,.5,.8},hover={.9,.8,.5,.9}}
 function U:Dialog(frame,profileBackground)
-    N.App.ui:Style(frame,'dialog')
+    checkAppearance(frame,'style',N.App.ui:Style(frame,'dialog'))
     if profileBackground then self.profileDialogs=self.profileDialogs or {};self.profileDialogs[#self.profileDialogs+1]=frame end
 end
 function U:RefreshButton(button)
@@ -19,7 +30,7 @@ function U:RefreshButton(button)
     button:SetAlpha(enabled and 1 or .5)
 end
 function U:StyleButton(button,card)
-    button.atcfStyle=card and cardStyle or buttonStyle;N.App.ui:Style(button,'button')
+    button.atcfStyle=card and cardStyle or buttonStyle;checkAppearance(button,'style',N.App.ui:Style(button,'button'))
     self.buttons=self.buttons or {};self.buttons[#self.buttons+1]=button
     button:HookScript("OnEnter",function() button.atcfHovered=true;self:RefreshButton(button) end)
     button:HookScript("OnLeave",function() button.atcfHovered=nil;self:RefreshButton(button) end)
@@ -47,7 +58,7 @@ function U:Font(object,baseSize)
     local entry=self.fontObjects[object]
     if not entry then entry={object,baseSize};self.texts[#self.texts+1]=entry;self.fontObjects[object]=entry else entry[2]=baseSize end
     local size=(object.atcfFixedFont and baseSize or math.max(9,baseSize+((self.owner and self.owner.profile.fontSize) or 13)-13))*(object.atcfFontScale or 1)
-    N.App.fonts:Apply(object,object.atcfEmphasis and 'emphasis' or 'body',{size=size})
+    checkAppearance(object,'font',N.App.fonts:Apply(object,object.atcfEmphasis and 'emphasis' or 'body',{size=size}))
     if object.atcfSoftShadow then object:SetShadowColor(0,0,0,.35);object:SetShadowOffset(0,0) end
     return object
 end
@@ -335,7 +346,7 @@ function U:ScrollIndicator(offset)
 end
 function U:Menu(parent,x,y,w,label,entries,choose)
     local d=CreateFrame("DropdownButton",nil,parent,"WowStyle1DropdownTemplate");d:SetPoint("TOPLEFT",x,y);d:SetSize(w,24);d:SetDefaultText(label)
-    if not self.menuFont then self.menuFont=CreateFont("AsTheCrowFliesMenuFont");self.menuFont.atcfFixedFont=true;self.menuFont.atcfOptions=true;self:Font(self.menuFont,12);N.App.ui:Color(self.menuFont,'text') end
+    if not self.menuFont then self.menuFont=CreateFont("AsTheCrowFliesMenuFont");self.menuFont.atcfFixedFont=true;self.menuFont.atcfOptions=true;self:Font(self.menuFont,12);checkAppearance(self.menuFont,'color',N.App.ui:Color(self.menuFont,'text')) end
     if d.Text then self:Font(d.Text,12);d.Text:ClearAllPoints();d.Text:SetPoint("LEFT",d,"LEFT",9,0);d.Text:SetSize(w-31,24);d.Text:SetJustifyH("LEFT");d.Text:SetJustifyV("MIDDLE");d.Text:SetWordWrap(false) end
     d:SetupMenu(function(_,root)
         root:SetScrollMode(220)
@@ -357,7 +368,7 @@ function U:FilterMenu(parent,c)
     d:SetPoint("TOPLEFT",c.profile.width-38,-42);d:SetSize(24,28)
     self:StyleButton(d)
     d.text=self:Text(d,"F",12,0,0,24,28);d.text:SetJustifyH("CENTER");self:Icon(d,"filter")
-    if not self.menuFont then self.menuFont=CreateFont("AsTheCrowFliesMenuFont");self.menuFont.atcfFixedFont=true;self.menuFont.atcfOptions=true;self:Font(self.menuFont,12);N.App.ui:Color(self.menuFont,'text') end
+    if not self.menuFont then self.menuFont=CreateFont("AsTheCrowFliesMenuFont");self.menuFont.atcfFixedFont=true;self.menuFont.atcfOptions=true;self:Font(self.menuFont,12);checkAppearance(self.menuFont,'color',N.App.ui:Color(self.menuFont,'text')) end
     d:SetupMenu(function(_,root)
         root:SetScrollMode(280)
         local function checkbox(container,label,selected,group,key)

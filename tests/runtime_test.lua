@@ -1864,6 +1864,7 @@ end)
 -- cannot accidentally supply a hidden flag or pre-created frame at startup.
 local function boot(character,legacy,profiles,provider)
     timers={};frames={};SlashCmdList={};SLASH_ASTHECROWFLIES_SND_ATCF1=nil
+    AsTheCrowFlies_SND_Options=nil;UISpecialFrames={}
     AsTheCrowFliesCharacter=N.Model.Copy(character)
     AsTheCrowFliesDB=N.Model.Copy(legacy)
     AsTheCrowFliesProfiles=N.Model.Copy(profiles)
