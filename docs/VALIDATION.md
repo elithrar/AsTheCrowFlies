@@ -2,7 +2,7 @@
 
 ## SND options and themes, 0.2.0
 
-The SND migration passes 48 model and 121 mocked runtime scenarios. Existing navigation coverage remains; settings fixtures now use public commands. Tests cover legacy/future-schema restoration, profile transitions during gestures, atomic compound edits, snapshot isolation, transient color previews, theme propagation, shared font fallback/recovery, UTF-8 captions and pooled short-screen options. The added atomic-edit case protects against partial placement commits and accidental SavedVariables aliasing.
+The SND migration passes 48 model and 122 mocked runtime scenarios. Existing navigation coverage remains; settings fixtures now use public commands. Tests cover legacy/future-schema restoration, profile transitions during gestures, atomic compound edits, snapshot isolation, transient color previews, theme propagation, shared font fallback/recovery, UTF-8 captions and pooled short-screen options. The added atomic-edit case protects against partial placement commits and accidental SavedVariables aliasing. An appearance recovery case injects a native menu error and a late invalidation to protect guard cleanup and bounded remeasurement.
 
 These are offline Lua 5.1 results. Native rendering, physical drag/resize and menu input, combat/taint and other add-ons remain unobserved. Earlier styling reports below describe previous releases.
 

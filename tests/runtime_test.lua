@@ -251,6 +251,29 @@ test('settings patches commit once and returned snapshots cannot mutate saved pr
     assert(AsTheCrowFliesDB.colors.text[1]~=0 and C.profile.colors.text[1]~=0)
     handle:Cancel();restorePreferences(C,original)
 end)
+-- Contained native failures must not freeze appearance; a late font invalidation needs a bounded remeasure.
+test('appearance refresh recovers after native errors and replays pending layout',function()
+    local original=U.SyncMenus;local scale=C.profile.scale;local calls=0
+    U.SyncMenus=function(self)
+        calls=calls+1;if calls==1 then error('injected menu refresh failure') end
+        return original(self)
+    end
+    assert(N.App:Set('scale',scale==1 and .9 or 1))
+    assert(#callbackErrors==1 and callbackErrors[1]:find('injected menu refresh failure',1,true))
+    callbackErrors={};N.App.log:Clear()
+    assert(not C.refreshingAppearance,'contained native errors must release the appearance guard')
+    C:RefreshAppearance();assert(calls==2)
+    calls=0
+    U.SyncMenus=function(self)
+        calls=calls+1;if calls==1 then C:RefreshAppearance() end
+        return original(self)
+    end
+    C:RefreshAppearance();assert(calls==2 and not C.refreshingAppearance and not C.appearancePending)
+    calls=0
+    U.SyncMenus=function(self)calls=calls+1;C:RefreshAppearance();return original(self)end
+    C:RefreshAppearance();assert(calls==3 and not C.refreshingAppearance and not C.appearancePending)
+    U.SyncMenus=original;assert(N.App:Set('scale',scale))
+end)
 test('native map transform and projection round trip',function()
     local p=A.FromMap(1429,.2,.8);assert(p.x==1600 and p.y==800)
     local x,y=A.Project(p,1429);assert(x==.2 and y==.8)

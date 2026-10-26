@@ -75,10 +75,19 @@ function C:Refresh()
     if self.ready then N.Overlay:Update(self,A.Position(),self.ctx or self:Context()) end
 end
 function C:RefreshAppearance()
-    if self.refreshingAppearance or not N.UI.frame then return end
+    if not N.UI.frame then return end
+    if self.refreshingAppearance then self.appearancePending=true;return end
     self.refreshingAppearance=true
-    N.UI:RefreshFonts();N.UI:ApplyAppearance();N.UI:SyncMenus();self:Refresh()
-    self.refreshingAppearance=false
+    local ok,err=pcall(function()
+        -- A late font fallback can invalidate text already measured in this pass.
+        for _=1,3 do
+            self.appearancePending=nil
+            N.UI:RefreshFonts();N.UI:ApplyAppearance();N.UI:SyncMenus();self:Refresh()
+            if not self.appearancePending then break end
+        end
+    end)
+    self.refreshingAppearance=nil;self.appearancePending=nil
+    if not ok then error(err) end
 end
 function C:SetPreferences(values,gesture)
     self.gestureWrite=gesture==true
