@@ -326,7 +326,6 @@ function C:Initialize()
         C_Timer.After(.1,step)
     end
 end
-local frame=CreateFrame("Frame");C.events=frame
 local npcEvents={}
 for _,event in ipairs({"GOSSIP_SHOW","QUEST_GREETING","QUEST_DETAIL","QUEST_PROGRESS","QUEST_COMPLETE","TRAINER_SHOW","MERCHANT_SHOW","BANKFRAME_OPENED","AUCTION_HOUSE_SHOW"}) do
     npcEvents[event]=true
@@ -359,16 +358,13 @@ local function onEvent(_,event,arg)
     end
 end
 for _,event in ipairs({"ADDON_LOADED","TAXIMAP_OPENED","TAXIMAP_CLOSED","PLAYER_LOGIN","PLAYER_ENTERING_WORLD","PLAYER_LOGOUT","UI_SCALE_CHANGED","DISPLAY_SIZE_CHANGED"}) do
-    if event ~= "PLAYER_LOGOUT" then required(scope:Event(event, function(...) onEvent(nil,event,...) end)) end
+    required(scope:Event(event, function(...) onEvent(nil,event,...) end))
 end
 for event in pairs(npcEvents) do required(scope:Event(event, function(...) onEvent(nil,event,...) end)) end
 if next(npcInteractionTypes) then
     local ok, err = scope:Event("PLAYER_INTERACTION_MANAGER_FRAME_SHOW", function(...) onEvent(nil,"PLAYER_INTERACTION_MANAGER_FRAME_SHOW",...) end)
     if not ok then app.log:Warn(err.message) end
 end
--- Native logout cleanup remains available after SND cancels ordinary subscriptions.
-frame:RegisterEvent("PLAYER_LOGOUT")
-frame:SetScript("OnEvent", onEvent)
 local slashOK, slashError = app:Slash("/atcf", function(text)
     if not C.ready then return end
     local cmd,rest=(text or ""):match("^%s*(%S*)%s*(.-)$");cmd=cmd:lower()

@@ -2170,12 +2170,12 @@ test('dropdown captions retain readable UTF8 text and complete selected identiti
     o.font:SetDefaultText('Arial');o:Layout();assert(o.font.Text:GetText()=='Arial' and not o.font.truncatedCaption)
 end)
 
--- SND disposal must not suppress the consumer's native ticker cleanup.
-test('SND shutdown cancels subscriptions while native logout cancels navigation ticker',function()
-    local fresh=boot(nil,nil,nil);local c=fresh.Core;local cancelled=false
-    c.ticker.Cancel=function() cancelled=true end
-    dispatchEvent('PLAYER_LOGOUT')
-    assert(cancelled and not fresh.App:IsReady() and not SlashCmdList.ASTHECROWFLIES_SND_ATCF)
+-- Logout must cancel the consumer ticker once, before SND disposes its scope.
+test('scoped logout cancels navigation ticker before SND shutdown',function()
+    local fresh=boot(nil,nil,nil);local c=fresh.Core;local cancelled=0
+    c.ticker.Cancel=function() assert(fresh.App:IsReady());cancelled=cancelled+1 end
+    dispatchEvent('PLAYER_LOGOUT');dispatchEvent('PLAYER_LOGOUT')
+    assert(cancelled==1 and not fresh.App:IsReady() and not SlashCmdList.ASTHECROWFLIES_SND_ATCF)
     local changed=0;c.RefreshAppearance=function() changed=changed+1 end
     dispatchEvent('UI_SCALE_CHANGED');assert(changed==0)
 end)
