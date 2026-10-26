@@ -1,23 +1,47 @@
 local ADDON,N=...;local M,A,R,V=N.Model,N.Adapter,N.Routes,N.Navigation
 local C={nav=V.New(),destinations={},filter={categories={},classes={},professions={}},results={},selected=1,searchGeneration=0};N.Core=C
--- SND owns ordinary subscriptions; gameplay and SavedVariables retain their existing owners.
-local app = N.SomethingNeedDoing:NewAddon(ADDON, {version="0.1.8"})
+-- SND owns preferences and callbacks; character navigation retains its own model.
+local app = N.SomethingNeedDoing:NewAddon(ADDON, {version="0.2.0"})
 N.App = app
 local scope = app:Scope("core")
 local function required(ok, result)
     if not ok then error(ADDON .. ": " .. result.message) end
     return result
 end
+app:Settings(N.Settings.Declaration())
+app:Appearance({themes={modern=N.SomethingNeedDoing.Themes.modern,forever=N.SomethingNeedDoing.Themes.forever},defaultTheme='modern'})
+N.Options:Declare(app)
+C.profileGeneration=0
+app:OnReady(function()
+    scope:Watch(app:SelectSettings(function(values,context)return {values=values,context=context}end),function(snapshot)
+        C.profile=snapshot.values;C.readOnly=snapshot.context.readOnly
+        C:BindFilters()
+    end)
+    C:Initialize()
+    scope:Watch(app:SelectAppearance(function(value)return value end),function(value)
+        N.UI.theme=value.theme;C:RefreshAppearance()
+    end)
+end)
+app:OnSettingsChanged(function(_,change)
+    N.UI.previewColors=nil
+    if (change.reason~='set' and change.reason~='patch') or (not C.gestureWrite and change:Touches('width','resultsHeight','x','y','dockPosition','scale')) then C.profileGeneration=C.profileGeneration+1 end
+    if not C.ready then return end
+    if change:Touches('dock') then C.tucked=C.profile.dock~='none' end
+    local filters=change.profileChanged
+    for path in pairs(change.keys) do if path:match('^filters%.') then filters=true end end
+    if filters then C:BindFilters(true)
+    elseif change:Touches('routeOrder') and #C.results>0 then C:Plan() end
+    if not change:Touches('font','fontSize','theme') then C:RefreshAppearance() end
+end)
 function C:BindFilters(refresh)
-    self.profile.searchFilters=self.profile.searchFilters or {categories={},classes={},professions={}}
-    self.filter=self.profile.searchFilters
+    self.filter=N.Settings.Filters(self.profile.searchFilters)
     if refresh then
         if self.matches~=nil or self.searching then self:Search(self.searchOrigin and self.originQuery or self.query or "",self.searchOrigin)
         elseif #self.results>0 then self:Plan() end
     end
 end
 function C:Filter(group,key)
-    local f=self.filter
+    local f=M.Copy(self.filter)
     if group=="all" then f.categories={};f.classes={};f.professions={}
     elseif group=="categories" then
         f.categories[key]=not f.categories[key] or nil
@@ -28,6 +52,7 @@ function C:Filter(group,key)
         f.categories[group=="classes" and "class" or "profession"]=true
         if key=="all" then f[group]={} else f[group][key]=not f[group][key] or nil end
     end
+    if not self:SetPreferences(N.Settings.FilterPatch(f)) then return end
     self.destination=nil;self:Edit(true);self:Search(self.query or "",false)
 end
 function C:Context()
@@ -49,33 +74,20 @@ function C:Refresh()
     if N.UI.frame then N.UI:Refresh(self) end
     if self.ready then N.Overlay:Update(self,A.Position(),self.ctx or self:Context()) end
 end
-function C:RefreshAppearance(retryFonts)
-    if self.refreshingAppearance then return end;self.refreshingAppearance=true
-    if retryFonts then N.UI:ResetFonts() end
-    for _=1,3 do
-        local revision=N.UI.fontRevision
-        N.UI:RefreshFonts()
-        if N.Options.frame then N.Options:Refresh(true) end
-        -- Menu generation or native widget states can replace a font. Repair
-        -- those after updating controls, then measure with the settled family.
-        N.UI:RefreshFonts();N.UI:ApplyAppearance();self:Refresh()
-        if N.Options.frame then N.Options:Layout() end
-        if revision==N.UI.fontRevision then break end
-    end
+function C:RefreshAppearance()
+    if self.refreshingAppearance or not N.UI.frame then return end
+    self.refreshingAppearance=true
+    N.UI:RefreshFonts();N.UI:ApplyAppearance();N.UI:SyncMenus();self:Refresh()
     self.refreshingAppearance=false
 end
-function C:ApplyProfile()
-    if not self.readOnly then AsTheCrowFliesDB=self.profile end
-    self:RefreshAppearance(true)
+function C:SetPreferences(values,gesture)
+    self.gestureWrite=gesture==true
+    local ok,err=app:SetMany(values)
+    self.gestureWrite=nil
+    if not ok then app.log:Warn(err.message) end
+    return ok,err
 end
-function C:SetRouteOrder(value)
-    if value~="distance" and value~="time" then return false end
-    if self.profile.routeOrder==value then return true end
-    self.profile.routeOrder=value
-    if #self.results>0 then self:Plan() end
-    self:ApplyProfile()
-    return true
-end
+function C:SetRouteOrder(value) return self:SetPreferences({routeOrder=value}) end
 function C:ShowPanel(show)
     self.hidden=not show;if show then self.tucked=false end
     self.character.hidden=self.hidden
@@ -276,13 +288,8 @@ function C:Tick()
     N.UI:Guidance(self,p,ctx,now);N.Overlay:Update(self,p,ctx)
 end
 function C:Initialize()
-    self.build=A.Build();self.profile,self.readOnly=N.Settings.Load(AsTheCrowFliesDB,self.build)
-    self.profiles,self.profilesReadOnly=N.Settings.Profiles(AsTheCrowFliesProfiles,self.profile)
-    self.readOnly=self.readOnly or self.profilesReadOnly
-    self.profile=self.profiles.profiles[self.profiles.active]
+    self.build=A.Build()
     self:BindFilters()
-    if not self.readOnly then AsTheCrowFliesProfiles=self.profiles end
-    if not self.readOnly then AsTheCrowFliesDB=self.profile end
     local futureCharacter=type(AsTheCrowFliesCharacter)=="table" and type(AsTheCrowFliesCharacter.version)=="number" and AsTheCrowFliesCharacter.version>1
     self.character=N.Settings.Character(AsTheCrowFliesCharacter,self.build)
     self.hidden=self.character.hidden;self.tucked=false
@@ -301,8 +308,8 @@ function C:Initialize()
     end
     for _,id in ipairs(self.data.taxiMaps or {}) do A.ObserveMap(id,self.character,self.data.nodes) end
     self:Context();self:Reindex();self.ready=true
-    N.UI:Create(self);N.Overlay:Create();N.Options:Create(self)
-    N.UI:WatchFonts();self:RefreshAppearance(false)
+    N.UI:Create(self);N.Overlay:Create()
+    self:RefreshAppearance()
     self.status=self.character.intent and "Previous route stopped on reload. Choose a destination to resume." or nil
     if self.build~=N.Data.build then self.status="Unvalidated client build: flight data disabled" end
     self:Refresh()
@@ -335,10 +342,8 @@ for _,name in ipairs({"Gossip","QuestGiver","Merchant","TaxiNode","Trainer","Ban
     local value=interactionTypes and interactionTypes[name];if A.Number(value) then npcInteractionTypes[value]=true end
 end
 local function onEvent(_,event,arg)
-    if event=="ADDON_LOADED" and arg==ADDON then C:Initialize()
-    elseif C.ready then
-        if event=="ADDON_LOADED" then N.UI:WatchFonts()
-        elseif npcEvents[event] then C:InteractionOpened()
+    if C.ready then
+        if npcEvents[event] then C:InteractionOpened()
         elseif event=="PLAYER_INTERACTION_MANAGER_FRAME_SHOW" and A.Number(arg) and npcInteractionTypes[arg] then C:InteractionOpened()
         elseif event=="TAXIMAP_OPENED" then C:TaxiOpened();C:InteractionOpened(C.taxi and C.taxi.from)
         elseif event=="TAXIMAP_CLOSED" then
@@ -357,7 +362,7 @@ local function onEvent(_,event,arg)
         elseif event=="UI_SCALE_CHANGED" or event=="DISPLAY_SIZE_CHANGED" then C:RefreshAppearance(false) end
     end
 end
-for _,event in ipairs({"ADDON_LOADED","TAXIMAP_OPENED","TAXIMAP_CLOSED","PLAYER_LOGIN","PLAYER_ENTERING_WORLD","PLAYER_LOGOUT","UI_SCALE_CHANGED","DISPLAY_SIZE_CHANGED"}) do
+for _,event in ipairs({"TAXIMAP_OPENED","TAXIMAP_CLOSED","PLAYER_LOGIN","PLAYER_ENTERING_WORLD","PLAYER_LOGOUT","UI_SCALE_CHANGED","DISPLAY_SIZE_CHANGED"}) do
     required(scope:Event(event, function(...) onEvent(nil,event,...) end))
 end
 for event in pairs(npcEvents) do required(scope:Event(event, function(...) onEvent(nil,event,...) end)) end

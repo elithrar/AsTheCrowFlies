@@ -1,21 +1,17 @@
 local _,N=...;local M=N.Model;local U={texts={}};N.UI=U
 local MEDIA="Interface\\AddOns\\AsTheCrowFlies\\Media\\"
 local gold={1,.82,0};local ink={.93,.94,.97}
--- FindAnUpgrade's dialog, option-button and search-card chrome. Keep these
--- shared by the island and options so their interaction states stay consistent.
-local controlBackdrop={bgFile="Interface\\Buttons\\WHITE8X8",edgeFile="Interface\\Tooltips\\UI-Tooltip-Border",tile=true,tileSize=8,edgeSize=10,insets={left=2,right=2,top=2,bottom=2}}
-local dialogBackdrop={bgFile="Interface\\Buttons\\WHITE8X8",edgeFile="Interface\\DialogFrame\\UI-DialogBox-Border",tile=true,tileSize=8,edgeSize=16,insets={left=4,right=4,top=4,bottom=4}}
+-- Framework chrome follows the selected theme; ATCF retains selection feedback.
 local buttonStyle={fill={.06,.06,.065,.8},border={.45,.45,.45,.65},hover={.9,.8,.5,.9}}
 local cardStyle={selected={.16,.14,.075,.96},fill={.045,.045,.05,.96},border={.5,.5,.5,.8},hover={.9,.8,.5,.9}}
 function U:Dialog(frame,profileBackground)
-    frame:SetBackdrop(dialogBackdrop);frame:SetBackdropColor(.045,.045,.05,.94);frame:SetBackdropBorderColor(.65,.65,.65,1)
+    N.App.ui:Style(frame,'dialog')
     if profileBackground then self.profileDialogs=self.profileDialogs or {};self.profileDialogs[#self.profileDialogs+1]=frame end
-end
-function U:Section(frame)
-    frame:SetBackdrop(controlBackdrop);frame:SetBackdropColor(.035,.035,.04,.35);frame:SetBackdropBorderColor(.35,.35,.35,.5)
 end
 function U:RefreshButton(button)
     local style=button.atcfStyle
+    local theme=self.theme
+    if theme then style={fill=theme.colors.surface,border=theme.colors.border,hover=theme.colors.accent,selected={theme.colors.accent[1]*.22,theme.colors.accent[2]*.22,theme.colors.accent[3]*.22,.96}} end
     local enabled=button:IsEnabled()
     local active=enabled and (button.atcfHovered or button.atcfSelected or button.IsMenuOpen and button:IsMenuOpen())
     button:SetBackdropColor(unpack(enabled and button.atcfSelected and style.selected or style.fill))
@@ -23,7 +19,8 @@ function U:RefreshButton(button)
     button:SetAlpha(enabled and 1 or .5)
 end
 function U:StyleButton(button,card)
-    button.atcfStyle=card and cardStyle or buttonStyle;button:SetBackdrop(controlBackdrop)
+    button.atcfStyle=card and cardStyle or buttonStyle;N.App.ui:Style(button,'button')
+    self.buttons=self.buttons or {};self.buttons[#self.buttons+1]=button
     button:HookScript("OnEnter",function() button.atcfHovered=true;self:RefreshButton(button) end)
     button:HookScript("OnLeave",function() button.atcfHovered=nil;self:RefreshButton(button) end)
     button:HookScript("OnHide",function() button.atcfHovered=nil;self:RefreshButton(button) end)
@@ -44,102 +41,23 @@ function U:ControlArt(frame)
     frame.Right:SetPoint("TOPRIGHT",frame,"TOPRIGHT",0,0);frame.Right:SetPoint("BOTTOMRIGHT",frame,"BOTTOMRIGHT",0,0)
     frame.Middle:SetPoint("TOPLEFT",frame.Left,"TOPRIGHT",0,0);frame.Middle:SetPoint("BOTTOMRIGHT",frame.Right,"BOTTOMLEFT",0,0)
 end
--- One checked family for all owned text, including native option controls.
--- Native font heights are uiUnits: cache their readback, not an exact size echo.
-U.fontRevision=0
-local function samePath(a,b)
-    return type(a)=="string" and type(b)=="string" and a:gsub("/","\\"):lower()==b:gsub("/","\\"):lower()
-end
-local function setFont(object,path,size,flags)
-    local ok,result=pcall(object.SetFont,object,path,size,flags or "")
-    if not ok or result==false then return false end
-    local actual,height=object:GetFont()
-    return samePath(actual,path) and type(height)=="number" and height>0
-end
-function U:ResetFonts() self.fontResolution=nil end
-function U:ResolveFont()
-    local fallback=STANDARD_TEXT_FONT or "Fonts\\FRIZQT__.TTF"
-    local pref=self.owner and self.owner.profile.font or "Expressway"
-    local lsm=LibStub and LibStub("LibSharedMedia-3.0",true)
-    local requested=pref=="Arial" and "Fonts\\ARIALN.TTF" or fallback
-    if pref~="Arial" and pref~="Game font" and lsm and lsm:IsValid("font",pref) then requested=lsm:Fetch("font",pref) end
-    if type(requested)~="string" or requested=="" then requested=fallback end
-    local key=pref..":"..requested..":"..fallback
-    local state=self.fontResolution
-    if not state or state.key~=key or state.library~=lsm then
-        if not self.fontProbe then self.fontProbe=UIParent:CreateFontString(nil,"OVERLAY");self.fontProbe:Hide() end
-        state={key=key,library=lsm,path=setFont(self.fontProbe,requested,12) and requested or fallback,default=fallback}
-        if state.path==requested and lsm and lsm:IsValid("font",pref.." Bold") then
-            local bold=lsm:Fetch("font",pref.." Bold")
-            if type(bold)=="string" and bold~=requested and setFont(self.fontProbe,bold,12) then state.bold=bold end
-        end
-        self.fontResolution=state;self.fontRevision=self.fontRevision+1
-    end
-    return state
-end
+-- Typography resolution, fallback and late media notifications belong to SND.
 function U:Font(object,baseSize)
     self.fontObjects=self.fontObjects or {}
     local entry=self.fontObjects[object]
     if not entry then entry={object,baseSize};self.texts[#self.texts+1]=entry;self.fontObjects[object]=entry else entry[2]=baseSize end
     local size=(object.atcfFixedFont and baseSize or math.max(9,baseSize+((self.owner and self.owner.profile.fontSize) or 13)-13))*(object.atcfFontScale or 1)
-    local state=self:ResolveFont();local path=object.atcfEmphasis and state.bold or state.path
-    local fontFlags=object.atcfEmphasis and not state.bold and "OUTLINE" or ""
-    local actual,height,flags=object:GetFont()
-    local changed=actual~=object.atcfFontPath or height~=object.atcfFontHeight or flags~=object.atcfFontFlags
-    local key=path..":"..size..":"..fontFlags
-    if state.native then
-        if object.atcfNativeFont~=state.native or changed then object:SetFontObject(state.native) end
-        object.atcfNativeFont=state.native;object.atcfFontKey=nil
-    elseif object.atcfFontKey~=key or changed then
-        object.atcfNativeFont=nil
-        local applied=setFont(object,path,size,fontFlags)
-        if not applied and state.bold and path==state.bold then
-            state.bold=nil;self.fontRevision=self.fontRevision+1;path=state.path;fontFlags="OUTLINE"
-            applied=setFont(object,path,size,fontFlags)
-        end
-        if not applied then
-            -- A late per-control rejection downgrades the entire family. The
-            -- refresh pass replays earlier objects before doing final layout.
-            if state.path~=state.default or state.bold then state.path=state.default;state.bold=nil;self.fontRevision=self.fontRevision+1 end
-            path=state.path;fontFlags=object.atcfEmphasis and "OUTLINE" or ""
-            if not setFont(object,path,size,fontFlags) then
-                state.native=GameFontNormal or GameTooltipText;self.fontRevision=self.fontRevision+1
-                object:SetFontObject(state.native);object.atcfNativeFont=state.native
-                local nativePath=object:GetFont();state.path=nativePath or state.default
-            end
-        end
-        object.atcfFontKey=not state.native and (path..":"..size..":"..fontFlags) or nil
-    end
-    object.atcfFontPath,object.atcfFontHeight,object.atcfFontFlags=object:GetFont()
-    if object.atcfSoftShadow then
-        object:SetShadowColor(0,0,0,.35);object:SetShadowOffset(0,0)
-    end
+    N.App.fonts:Apply(object,object.atcfEmphasis and 'emphasis' or 'body',{size=size})
+    if object.atcfSoftShadow then object:SetShadowColor(0,0,0,.35);object:SetShadowOffset(0,0) end
     return object
 end
-function U:RefreshFonts()
-    for _=1,3 do
-        local revision=self.fontRevision
-        for _,v in ipairs(self.texts) do self:Font(v[1],v[2]) end
-        if revision==self.fontRevision then break end
-    end
-end
+function U:RefreshFonts() for _,entry in ipairs(self.texts) do self:Font(entry[1],entry[2]) end end
 function U:SyncMenus()
+    if not self.menuFont then return end
     local path,size,flags=self.menuFont:GetFont();local key=tostring(path)..":"..tostring(size)..":"..tostring(flags)
     for _,d in ipairs(self.dropdowns or {}) do
-        -- Native generated selection text overrides SetDefaultText. Refresh
-        -- after values change, never before a profile switch's new values.
-        if d.atcfMenuFont~=key or d.atcfSelectionValue~=d.value then
-            d:GenerateMenu();d.atcfMenuFont=key;d.atcfSelectionValue=d.value
-        end
+        if d.atcfMenuFont~=key or d.atcfSelectionValue~=d.value then d:GenerateMenu();d.atcfMenuFont=key;d.atcfSelectionValue=d.value end
     end
-end
-function U:WatchFonts()
-    local lsm=LibStub and LibStub("LibSharedMedia-3.0",true)
-    if not lsm or self.fontLibrary==lsm or not lsm.RegisterCallback then return end
-    self.fontLibrary=lsm
-    self.fontChanged=self.fontChanged or function(_,kind) if kind=="font" and self.owner then self.owner:RefreshAppearance(true) end end
-    lsm.RegisterCallback(self,"LibSharedMedia_Registered",self.fontChanged);lsm.RegisterCallback(self,"LibSharedMedia_SetGlobal",self.fontChanged)
-    self.fontChanged(nil,"font")
 end
 
 function U:ClassLabel(token)
@@ -154,7 +72,14 @@ function U:Text(parent,text,size,x,y,width,height)
 end
 function U:ApplyAppearance()
     self:HideRowTip()
-    local colors=self.owner.profile.colors
+    local colors=M.Copy(self.owner.profile.colors)
+    if self.theme then
+        local function defaultColor(key) for i=1,3 do if colors[key][i]~=N.Settings.defaults.colors[key][i] then return false end end;return true end
+        if defaultColor('background') then colors.background=self.theme.colors.surface end
+        if defaultColor('text') then colors.text=self.theme.colors.text end
+    end
+    for key,value in pairs(self.previewColors or {}) do colors[key]=value end
+    for _,button in ipairs(self.buttons or {}) do self:RefreshButton(button) end
     if not colors then return end
     for _,frame in ipairs(self.profileDialogs or {}) do frame:SetBackdropColor(colors.background[1],colors.background[2],colors.background[3],.94) end
     for _,entry in ipairs(self.texts) do if not entry[1].atcfOptions and not entry[1].atcfTooltip then entry[1]:SetTextColor(unpack(colors.text)) end end
@@ -293,7 +218,7 @@ end
 function U:SetDock(c,side,tuck)
     self:FinishMove(c,false);self:FinishResize(c,false)
     self:FinishHandleDrag()
-    c.profile.dock=(side=="left" or side=="right") and side or "none";c.tucked=tuck and c.profile.dock~="none" or false
+    if not c:SetPreferences({dock=(side=="left" or side=="right") and side or "none"}) then return end;c.tucked=tuck and c.profile.dock~="none" or false
     N.Options:RefreshPlacement()
     self:Layout(c)
 end
@@ -310,13 +235,14 @@ function U:FinishHandleDrag()
     if self.handle then self.handle:SetScript("OnUpdate",nil) end
 end
 function U:UpdateHandleDrag(c)
+    if c.gestureWrite then return end -- Settings notification can synchronously relayout the handle.
     local drag=self.handleDrag;if not drag then return end
-    if drag.profile~=c.profile or drag.side~=c.profile.dock or c.profile.locked or c.hidden or not c.tucked or drag.travel~=self:HandleTravel() then
+    if drag.profile~=c.profileGeneration or drag.side~=c.profile.dock or c.profile.locked or c.hidden or not c.tucked or drag.travel~=self:HandleTravel() then
         self:FinishHandleDrag();return
     end
     local _,y=N.Adapter.Call(GetCursorPosition)
     if N.Adapter.Number(y) and drag.travel>0 then
-        c.profile.dockPosition=math.max(0,math.min(1,drag.position+(drag.cursorY-y)/drag.travel))
+        c:SetPreferences({dockPosition=math.max(0,math.min(1,drag.position+(drag.cursorY-y)/drag.travel))},true)
         self:PlaceHandle(c)
     end
 end
@@ -355,7 +281,7 @@ function U:SharedDestination(results)
 end
 function U:SavePlacement(c)
     local left,top=self.frame:GetLeft(),self.frame:GetTop()
-    if left and top then c.profile.x=left;c.profile.y=top-UIParent:GetHeight()/self.frame:GetScale() end
+    if left and top then c:SetPreferences({x=math.max(-20000,math.min(20000,left)),y=math.max(-20000,math.min(20000,top-UIParent:GetHeight()/self.frame:GetScale()))},true) end
 end
 function U:GestureGeometry(c)
     return {width=UIParent:GetWidth(),height=UIParent:GetHeight(),scale=UIParent:GetEffectiveScale(),profileScale=c.profile.scale}
@@ -367,13 +293,17 @@ end
 function U:FinishMove(c,save)
     if not self.dragging then return end
     self.dragging=false;self.frame:StopMovingOrSizing()
-    if save and self.moveProfile==c.profile then self:SavePlacement(c) end
+    if save and self.moveProfile==c.profileGeneration then self:SavePlacement(c) end
     self.moveProfile=nil;self.moveGeometry=nil;self.moveWidth=nil
 end
 function U:FinishResize(c,save)
     if not self.resizing then return end
     self.resizing=false;self.frame:StopMovingOrSizing()
-    if save~=false and self.resizeProfile==c.profile then self:SavePlacement(c) end
+    if save~=false and self.resizeProfile==c.profileGeneration then
+        if self.pendingResultsHeight then c:SetPreferences({resultsHeight=self.pendingResultsHeight},true) end
+        self:SavePlacement(c)
+    end
+    self.pendingResultsHeight=nil
     self.resizeProfile=nil;self.resizeMode=nil;self.resizeGeometry=nil
     N.Options:RefreshPlacement()
 end
@@ -381,9 +311,9 @@ function U:CancelStaleGestures(c)
     -- A native gesture belongs to its starting profile and coordinate system.
     -- Cancel before layout so a hide, profile switch or display change can apply.
     local unavailable=c.hidden or c.tucked or c.profile.locked
-    if self.dragging and (unavailable or self.moveProfile~=c.profile or self.moveWidth~=c.profile.width
+    if self.dragging and (unavailable or self.moveProfile~=c.profileGeneration or self.moveWidth~=c.profile.width
         or self:GeometryChanged(c,self.moveGeometry)) then self:FinishMove(c,false) end
-    if self.resizing and (unavailable or self.resizeProfile~=c.profile or self.resizeMode~=self:ResizeMode(c)
+    if self.resizing and (unavailable or self.resizeProfile~=c.profileGeneration or self.resizeMode~=self:ResizeMode(c)
         or self:GeometryChanged(c,self.resizeGeometry)) then self:FinishResize(c,false) end
 end
 function U:ResizeMode(c)
@@ -405,7 +335,7 @@ function U:ScrollIndicator(offset)
 end
 function U:Menu(parent,x,y,w,label,entries,choose)
     local d=CreateFrame("DropdownButton",nil,parent,"WowStyle1DropdownTemplate");d:SetPoint("TOPLEFT",x,y);d:SetSize(w,24);d:SetDefaultText(label)
-    if not self.menuFont then self.menuFont=CreateFont("AsTheCrowFliesMenuFont");self.menuFont.atcfFixedFont=true;self.menuFont.atcfOptions=true;self:Font(self.menuFont,12);self.menuFont:SetTextColor(unpack(ink)) end
+    if not self.menuFont then self.menuFont=CreateFont("AsTheCrowFliesMenuFont");self.menuFont.atcfFixedFont=true;self.menuFont.atcfOptions=true;self:Font(self.menuFont,12);N.App.ui:Color(self.menuFont,'text') end
     if d.Text then self:Font(d.Text,12);d.Text:ClearAllPoints();d.Text:SetPoint("LEFT",d,"LEFT",9,0);d.Text:SetSize(w-31,24);d.Text:SetJustifyH("LEFT");d.Text:SetJustifyV("MIDDLE");d.Text:SetWordWrap(false) end
     d:SetupMenu(function(_,root)
         root:SetScrollMode(220)
@@ -427,7 +357,7 @@ function U:FilterMenu(parent,c)
     d:SetPoint("TOPLEFT",c.profile.width-38,-42);d:SetSize(24,28)
     self:StyleButton(d)
     d.text=self:Text(d,"F",12,0,0,24,28);d.text:SetJustifyH("CENTER");self:Icon(d,"filter")
-    if not self.menuFont then self.menuFont=CreateFont("AsTheCrowFliesMenuFont");self.menuFont.atcfFixedFont=true;self.menuFont.atcfOptions=true;self:Font(self.menuFont,12);self.menuFont:SetTextColor(unpack(ink)) end
+    if not self.menuFont then self.menuFont=CreateFont("AsTheCrowFliesMenuFont");self.menuFont.atcfFixedFont=true;self.menuFont.atcfOptions=true;self:Font(self.menuFont,12);N.App.ui:Color(self.menuFont,'text') end
     d:SetupMenu(function(_,root)
         root:SetScrollMode(280)
         local function checkbox(container,label,selected,group,key)
@@ -487,7 +417,7 @@ function U:Create(c)
     local header=CreateFrame("Frame",nil,f);self.header=header;header:SetPoint("TOPLEFT");header:SetSize(c.profile.width-78,44);header:EnableMouse(true);header:RegisterForDrag("LeftButton")
     header:SetScript("OnDragStart",function()
         if c.profile.locked or c.hidden or c.tucked or self.resizing then return end
-        self.moveProfile=c.profile;self.moveGeometry=self:GestureGeometry(c);self.moveWidth=c.profile.width;self.dragging=true;f:StartMoving()
+        self.moveProfile=c.profileGeneration;self.moveGeometry=self:GestureGeometry(c);self.moveWidth=c.profile.width;self.dragging=true;f:StartMoving()
     end)
     header:SetScript("OnDragStop",function()
         self:CancelStaleGestures(c)
@@ -583,7 +513,7 @@ function U:Create(c)
         self.handleSuppressClick=true
         local _,y=N.Adapter.Call(GetCursorPosition)
         if not N.Adapter.Number(y) then return end
-        self.handleDrag={profile=c.profile,side=c.profile.dock,cursorY=y,position=c.profile.dockPosition,travel=self:HandleTravel()}
+        self.handleDrag={profile=c.profileGeneration,side=c.profile.dock,cursorY=y,position=c.profile.dockPosition,travel=self:HandleTravel()}
         handle:SetScript("OnUpdate",function() self:UpdateHandleDrag(c) end)
     end)
     local function finishHandle() self:UpdateHandleDrag(c);self:FinishHandleDrag() end
@@ -597,9 +527,9 @@ function U:Create(c)
     self:Tip(grip,"Drag to resize")
     grip:SetScript("OnMouseDown",function(_,button)
         if button~="LeftButton" or c.profile.locked or self.dragging or not grip:IsShown() then return end
-        self.resizeMode=self:ResizeMode(c);self.resizeProfile=c.profile;self.resizeGeometry=self:GestureGeometry(c)
+        self.resizeMode=self:ResizeMode(c);self.resizeProfile=c.profileGeneration;self.resizeGeometry=self:GestureGeometry(c)
         self.resizeChrome=f:GetHeight()-self.bodyScroll:GetHeight();self.resizing=true
-        self:SavePlacement(c);c.profile.dock="none";f:StartSizing(self.resizeMode=="results" and "BOTTOMRIGHT" or "RIGHT")
+        self:SavePlacement(c);c:SetPreferences({dock="none"});f:StartSizing(self.resizeMode=="results" and "BOTTOMRIGHT" or "RIGHT")
     end)
     grip:SetScript("OnMouseUp",function(_,button) if button=="LeftButton" and self.resizing then self:FinishResize(c);c:Refresh() end end)
     grip:SetScript("OnHide",function() self:FinishResize(c,false) end)
@@ -607,9 +537,9 @@ function U:Create(c)
     f:HookScript("OnSizeChanged",function(_,width,height)
         if not self.resizing or self.resizeLayout then return end
         self:CancelStaleGestures(c);if not self.resizing then return end
-        c.profile.width=math.max(N.Settings.minWidth,math.min(N.Settings.maxWidth,width))
-        if self.resizeMode=="results" then c.profile.resultsHeight=math.max(100,math.min(560,height-self.resizeChrome)) end
-        self.resizeLayout=true;self:Refresh(c);self.resizeLayout=false
+        local changes={width=math.max(N.Settings.minWidth,math.min(N.Settings.maxWidth,width))}
+        if self.resizeMode=="results" then changes.resultsHeight=math.max(100,math.min(560,height-self.resizeChrome)) end
+        self.resizeLayout=true;c:SetPreferences(changes,true);self:Refresh(c);self.resizeLayout=false
     end)
     f:SetScript("OnHide",function()
         self:HideRowTip()
@@ -623,7 +553,7 @@ function U:Create(c)
     end
     self.menuOptions=action("Settings",-8,function() N.Options:Open() end)
     self.menuSave=action("Save current location",-40,function() SlashCmdList.ASTHECROWFLIES("remember") end)
-    self.menuLock=action("Lock / unlock panel",-72,function() c.profile.locked=not c.profile.locked;c:Refresh() end)
+    self.menuLock=action("Lock / unlock panel",-72,function() c:SetPreferences({locked=not c.profile.locked}) end)
     self.menuTuck=action("Tuck to screen edge",-104,function() self:SetDock(c,c.profile.dock=="none" and "right" or c.profile.dock,true) end)
     self.menuClose=action("Close menu",-136,function() end);menu:Hide()
     UISpecialFrames=UISpecialFrames or {};table.insert(UISpecialFrames,"AsTheCrowFliesMenu")
@@ -800,7 +730,7 @@ function U:Refresh(c)
             -- sizing owns the outer frame. Rebudget the viewport immediately.
             self.resizeChrome=bodyTop+messageHeight+bodyGap+footerHeight
             requested=math.max(1,math.min(560,self.frame:GetHeight()-self.resizeChrome))
-            c.profile.resultsHeight=math.max(100,requested)
+            self.pendingResultsHeight=math.max(100,requested)
         end
         local visible=math.max(0,math.min(resizingResults and requested or bodyHeight,requested,math.max(1,limit)))
         self.bodyScroll:SetHeight(math.max(1,visible));self.bodyScrollRange=math.max(0,bodyHeight-visible)
