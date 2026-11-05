@@ -1,7 +1,7 @@
 local ADDON,N=...;local M,A,R,V=N.Model,N.Adapter,N.Routes,N.Navigation
 local C={nav=V.New(),destinations={},filter={categories={},classes={},professions={}},results={},selected=1,searchGeneration=0};N.Core=C
 -- SND owns preferences and callbacks; character navigation retains its own model.
-local app = N.SomethingNeedDoing:NewAddon(ADDON, {version="0.2.0"})
+local app = N.SomethingNeedDoing:NewAddon(ADDON, {version="0.2.1"})
 N.App = app
 local scope = app:Scope("core")
 local function required(ok, result)

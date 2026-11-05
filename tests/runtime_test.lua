@@ -131,11 +131,13 @@ function methods:SetupMenu(fn) self.menu=fn end
 function methods:HasFocus() return self.focus==true end
 function methods:ClearFocus() self.focus=false end
 function methods:SetFocus() self.focus=true end
+function methods:SetCheckedTexture(texture)self.checkedTexture=texture end
+function methods:SetDisabledCheckedTexture(texture)self.disabledCheckedTexture=texture end
 function methods:SetChecked(v) self.checked=v end
 function methods:GetChecked() return self.checked end
 function methods:SetOwner(owner,anchor) self.tooltipOwner=owner;self.tooltipAnchor=anchor end
 function methods:GetOwner() return self.tooltipOwner end
-function methods:SetThumbTexture(path) self.thumb=self:CreateTexture();self.thumb:SetTexture(path) end
+function methods:SetThumbTexture(path) if type(path)=="table" then self.thumb=path else self.thumb=self:CreateTexture();self.thumb:SetTexture(path) end end
 function methods:GetThumbTexture() return self.thumb end
 function methods:SetClampedToScreen(value) self.clamped=value end
 local noop={'SetAllPoints','SetShadowColor','SetShadowOffset','SetAutoFocus','SetMaxLetters','SetTextInsets','HighlightText','SetMovable','EnableMouse','RegisterForDrag','EnableMouseWheel','SetDrawLayer'}
@@ -154,7 +156,7 @@ function methods:CreateFontString() local text=object();text.parent=self;return 
 function CreateFont(name) return object(name) end
 function CreateFrame(kind,name,parent,template)
     local f=object(name);f.parent=parent;f.kind=kind;f.template=template
-    if template=='BackdropTemplate' then
+    if template and template:find('BackdropTemplate',1,true) then
         -- Backdrop.xml inherits OnBackdropSizeChanged; replacing it leaves the
         -- native border's texture coordinates at the previous frame size.
         f:SetScript('OnSizeChanged',function() f.nativeBackdropSizes=(f.nativeBackdropSizes or 0)+1 end)
@@ -162,7 +164,9 @@ function CreateFrame(kind,name,parent,template)
     if kind=='DropdownButton' or template=='UICheckButtonTemplate' then f.Text=object();f.Text.parent=f end
     if template=='InputBoxTemplate' then
         for _,key in ipairs({'Left','Middle','Right'}) do f[key]=f:CreateTexture() end
-    elseif template=='WowStyle1DropdownTemplate' then
+    elseif template and template:find('WowStyle1DropdownTemplate',1,true) then
+        f.Background=object();f.Background.parent=f;f.Arrow=object();f.Arrow.parent=f
+        f.OnButtonStateChanged=function(self)self.Text:SetTextColor(1,1,1,1)end
         f.Background=f:CreateTexture();f.Text:SetPoint('TOPLEFT',f,'TOPLEFT',9,-7)
     end
     if template=='SharedTooltipTemplate' then
@@ -900,7 +904,7 @@ test('opening options repairs native dropdown checkbox and edit font resets usin
         local O=N.Options;local font=option(O,'appearance',2);local checkbox=option(O,'navigation',2)
         local label=O.panel._texts['navigation:1:2:label'];local reset={font.Text,label,O.panel._menuFont}
         for _,text in ipairs(reset) do text:SetFont('native-widget-reset.ttf',10,'OUTLINE') end
-        O.panel:Close();assert(O:Open('navigation'));assert(label.font=='review-expressway.ttf' and not checkbox.Text:IsShown())
+        O.panel:Close();assert(O:Open('navigation'));assert(label.font=='review-expressway.ttf' and not checkbox.Text and checkbox.checkedTexture~=nil)
         assert(O:Open('appearance'));assert(font.Text.font=='review-expressway.ttf' and O.panel._menuFont.font=='review-expressway.ttf')
         O.panel:Close()
     end)
@@ -2096,8 +2100,8 @@ test('navigation menu stays on screen at bottom edges and follows layout changes
 end)
 test('short options preserve type size and expose every control through scroll navigation',function()
     local fresh=boot();local o=fresh.Options;local panel=o.panel
-    UIParent:SetSize(960,360);local font=option(o,'appearance',2)
-    assert(panel.frame:GetScale()==1 and panel.frame:GetHeight()==344 and font.Text:GetScale()==1)
+    UIParent:SetSize(960,280);local font=option(o,'appearance',2)
+    assert(panel.frame:GetScale()==1 and panel.frame:GetHeight()==264 and font.Text:GetScale()==1)
     assert(font.Text.fontSize==13 and panel._maximum>0 and panel.bar:IsShown())
     assert(font.parent==panel.body and panel.body.parent==panel.scroll)
     font.menuOpen=true;panel.scroll.scripts.OnMouseWheel(nil,-1)
@@ -2155,6 +2159,22 @@ test('scoped logout cancels navigation ticker before SND shutdown',function()
     assert(cancelled==1 and not fresh.App:IsReady() and not SlashCmdList.ASTHECROWFLIES_SND_ATCF)
     local changed=0;c.RefreshAppearance=function() changed=changed+1 end
     dispatchEvent('UI_SCALE_CHANGED');assert(changed==0)
+end)
+
+test('compact options share theme controls without losing page navigation',function()
+    local fresh=boot();local o=fresh.Options;local font=option(o,'appearance',2);local panel=o.panel
+    assert(panel.frame:GetWidth()==560 and panel.frame:GetHeight()==480)
+    assert(panel._maximum==0 and not panel.bar:IsShown())
+    assert(not panel._texts['appearance:section:1'])
+    local label=panel._texts['appearance:1:2:label']
+    assert(font.point[2]>=label.point[2]+label:GetWidth()+15)
+    for _,theme in ipairs({'modern','forever'})do
+        assert(fresh.App:Set('theme',theme));font:OnButtonStateChanged()
+        assert(not font.Background:IsShown() and not font.Arrow:IsShown())
+        assert(panel._pool['tab:appearance']._selected:IsShown())
+        assert(o:Open('navigation'));assert(panel._pool['tab:navigation']._selected:IsShown())
+        assert(o:Open('appearance'))
+    end
 end)
 
 print('PASS runtime scenarios: '..count..'; frames allocated='..#frames)
