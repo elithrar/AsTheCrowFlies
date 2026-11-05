@@ -140,7 +140,9 @@ function methods:GetOwner() return self.tooltipOwner end
 function methods:SetThumbTexture(path) if type(path)=="table" then self.thumb=path else self.thumb=self:CreateTexture();self.thumb:SetTexture(path) end end
 function methods:GetThumbTexture() return self.thumb end
 function methods:SetClampedToScreen(value) self.clamped=value end
-local noop={'SetAllPoints','SetShadowColor','SetShadowOffset','SetAutoFocus','SetMaxLetters','SetTextInsets','HighlightText','SetMovable','EnableMouse','RegisterForDrag','EnableMouseWheel','SetDrawLayer'}
+function methods:EnableMouse(value)self.mouseEnabled=value end
+function methods:RegisterForClicks(...)self.clickButtons={...}end
+local noop={'SetAllPoints','SetShadowColor','SetShadowOffset','SetAutoFocus','SetMaxLetters','SetTextInsets','HighlightText','SetMovable','RegisterForDrag','EnableMouseWheel','SetDrawLayer'}
 for _,name in ipairs(noop) do methods[name]=function() end end
 function GetCursorPosition() return cursorX,cursorY end
 local function object(name)
@@ -2166,6 +2168,12 @@ test('compact options share theme controls without losing page navigation',funct
     assert(panel.frame:GetWidth()==560 and panel.frame:GetHeight()==480)
     assert(panel._maximum==0 and not panel.bar:IsShown())
     assert(not panel._texts['appearance:section:1'])
+    for _,id in ipairs({'navigation','position','profiles','appearance'})do
+        local tab=panel._pool['tab:'..id];assert(tab.mouseEnabled and tab.clickButtons[1]=='LeftButtonUp')
+        tab.scripts.OnClick(tab,'LeftButton');assert(panel._page==id and panel:IsShown())
+    end
+    local swatch=panel._pool['appearance:1:5'];local colorLabel=panel._texts['appearance:1:5:label']
+    assert(swatch.point[2]==font.point[2] and colorLabel.point[2]==0 and swatch._swatch)
     local label=panel._texts['appearance:1:2:label']
     assert(font.point[2]>=label.point[2]+label:GetWidth()+15)
     for _,theme in ipairs({'modern','forever'})do
