@@ -9,8 +9,8 @@ function O:Declare(app)
         N.UI.previewColors=N.UI.previewColors or {};N.UI.previewColors[key]=not same and color or nil
         N.UI:ApplyAppearance()
     end end
-    self.panel=app:Options({title='As The Crow Flies',pages={
-        {id='appearance',label='Appearance',sections={{title='Appearance',controls={
+    self.panel=app:Options({title='As The Crow Flies',width=560,height=480,pages={
+        {id='appearance',label='Appearance',sections={{controls={
             {type='select',key='theme',label='Theme',choices=function()return app.ui:Themes()end},
             {type='font',key='font',label='Font'},
             {type='slider',key='fontSize',label='Font size',step=1},
@@ -18,12 +18,12 @@ function O:Declare(app)
             {type='color',key='colors.background',label='Background',preview=preview('background')},
             {type='color',key='colors.text',label='Text',preview=preview('text')},
         }}}},
-        {id='navigation',label='Navigation',sections={{title='Navigation',controls={
+        {id='navigation',label='Navigation',sections={{controls={
             {type='select',key='routeOrder',label='Route order',choices=choices({{'distance','Distance'},{'time','Estimated time'}})},
             {type='checkbox',key='mapMarkers',label='World / zone map markers'},
             {type='checkbox',key='minimapMarkers',label='Minimap markers'},
         }}}},
-        {id='position',label='Position',sections={{title='Position',controls={
+        {id='position',label='Position',sections={{controls={
             {type='checkbox',key='locked',label='Lock position'},
             {type='select',key='dock',label='Screen edge',choices=choices({{'none','Free (dragged)'},{'left','Left screen edge'},{'right','Right screen edge'}})},
             {type='select',key='strata',label='Frame layer',choices=choices({{'LOW','Low'},{'MEDIUM','Medium'},{'HIGH','High'}})},
