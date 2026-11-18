@@ -1136,6 +1136,13 @@ test('profile switch during a header drag preserves the replacement placement an
     assert(C.profile.x==91 and C.profile.y==-77 and U.frame:GetScale()==.5 and U.frame:GetFrameStrata()=='LOW')
     U.header.scripts.OnDragStop();assert(C.profile.x==91 and C.profile.y==-77 and C.profile.width==220)
     -- Same-name reset/copy also invalidate a gesture, even though the profile ID remains.
+    for _,method in ipairs({'Switch','CopyFrom'})do
+        U.header.scripts.OnDragStart();assert(U.dragging)
+        local generation=C.profileGeneration
+        assert(N.App.profiles[method](N.App.profiles,N.App.profiles:Active()))
+        assert(C.profileGeneration>generation and not U.dragging and not U.frame.moving,'equal-value replacement cancels movement')
+        U.header.scripts.OnDragStop();assert(C.profile.x==91 and C.profile.y==-77)
+    end
     U.header.scripts.OnDragStart();assert(U.dragging);assert(N.App.profiles:Reset());assert(not U.dragging)
     setPreference(C,'width',261);U.header.scripts.OnDragStart();assert(U.dragging);assert(N.App.profiles:CopyFrom(active));assert(not U.dragging)
     U.frame.GetLeft=left;U.frame.GetTop=top;assert(N.App.profiles:Switch(active));restorePreferences(C,profile);C:ShowPanel(true)
