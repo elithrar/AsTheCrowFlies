@@ -32,7 +32,12 @@ end
 function methods:SetScript(event,fn) self.scripts[event]=fn end
 function methods:GetScript(event) return self.scripts[event] end
 function methods:HookScript(event,fn) local previous=self.scripts[event];self.scripts[event]=function(...) if previous then previous(...) end;fn(...) end end
-function methods:RegisterEvent(event) self.events[event]=true end
+function methods:IsEventRegistered(event) return self.events[event] == true end
+function methods:RegisterEvent(event)
+    if self:IsEventRegistered(event) then return false end
+    self.events[event] = true
+    return true
+end
 function methods:UnregisterEvent(event) self.events[event]=nil end
 function methods:UnregisterAllEvents() self.events={} end
 function methods:Show() self.showCount=(self.showCount or 0)+1;local changed=self.shown==false;self.shown=true;if changed and self.scripts.OnShow then self.scripts.OnShow(self) end end
